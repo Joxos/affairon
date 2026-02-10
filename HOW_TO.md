@@ -352,6 +352,12 @@
 - 每条记录包含：编号、讨论主题、备选方案、最终决策及理由。
 - 记录时机：在用户确认技术决策后，立即追加到 `TECH_DISCUZ.md`。
 
+### 9.9 Commit Message 建议
+
+- Agent 在每次阶段性任务完成后**必须**给出 commit message 建议。
+- commit message **必须**遵循 Conventional Commits 格式（见§7.1 及 `CONV_COMMIT.md`）。
+- 建议应反映本次阶段性任务的实际变更内容，而非笼统描述。
+
 ---
 
 ## 10. 交付与回顾 → `REVIEW.md`

@@ -11,3 +11,11 @@
 - **决策原因**：初版保持简单，`int` 自增和 `float` 时间戳覆盖绝大多数场景。泛型方案增加用户侧复杂度，不适合 MVP。
 - **影响范围**：C-001（Event）、C-002（Dispatcher）
 - **参考讨论**：`TECH_DISCUZ.md` TD-001
+
+### TD-002: 异步并发 emit 的行为保证
+
+- **当前状态**：`AsyncDispatcher.emit()` 使用 `_is_emitting` 标志进行递归保护，但未明确定义多个 `emit()` 协程并发调用时的行为（如 `asyncio.gather(d.emit(e1), d.emit(e2))`）。
+- **期望状态**：明确并发 `emit` 的语义——是串行化（`asyncio.Lock`）还是支持独立队列并发。
+- **决策原因**：初版建议使用 `asyncio.Lock` 串行化，保证行为简单可预测。如性能不可接受再引入并发方案。
+- **影响范围**：C-002（AsyncDispatcher）
+- **参考讨论**：`INFRASTRUCTURE.md` §8.2.9

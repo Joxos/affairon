@@ -661,3 +661,793 @@ class DeadLetterEntry:
 | `KeyConflictError` | `EventdError`, `ValueError` | 合并监听器返回字典时键冲突 |
 | `QueueFullError` | `EventdError`, `RuntimeError` | 同步事件队列超出 `max_size` |
 | `ShutdownTimeoutError` | `EventdError`, `TimeoutError` | 优雅停机超时 |
+
+---
+
+## 8. 内部逻辑设计
+
+> 本节为 `INFRASTRUCTURE.md` §4（HOW_TO.md §4）的产出。  
+> 对每个组件的公开 API 推导其实现所需的内部方法、算法和伪代码。标注时间/空间复杂度（如适用）。
+
+### C-001 内部逻辑（Event）
+
+#### 8.1.1 框架保留字段保护
+
+**目标**：用户构造 `Event` 子类时，不得传入 `event_id` 或 `timestamp`。这两个字段由 Dispatcher 在 `emit()` 时赋值。
+
+**实现方案**：利用 pydantic `model_validator(mode="before")` 在字段解析前拦截。
+
+```python
+# 伪代码
+class Event(pydantic.BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    event_id: int | None = Field(default=None, init=False)
+    timestamp: float | None = Field(default=None, init=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_reserved_fields(cls, data: dict) -> dict:
+        # pydantic v2 的 mode="before" 在字段解析前执行
+        # data 为用户传入的原始字典
+        reserved = {"event_id", "timestamp"}
+        provided = reserved & set(data.keys())
+        if provided:
+            raise EventValidationError(
+                f"保留字段不可由用户传入: {provided}"
+            )
+        return data
+```
+
+**关键点**：
+
+- `init=False`：pydantic 在 `__init__` 签名中不暴露该字段，但如果用户通过 `dict` 或 `**kwargs` 传入仍可绕过，因此需要 `model_validator` 主动拦截
+- `frozen=True`：Event 实例创建后所有字段不可变（pydantic 保证）。但 Dispatcher 需要在 `emit()` 时赋值 `event_id` 和 `timestamp`，使用 `model_config` 中的 `frozen=True` 后需通过 `object.__setattr__()` 绕过 frozen 保护进行一次性注入（见 C-002 `_inject_metadata`）
+
+#### 8.1.2 EventValidationError 包装
+
+**目标**：用户自定义字段验证失败时，将 pydantic `ValidationError` 包装为 `EventValidationError`。
+
+**实现方案**：在 `Event.__init_subclass__` 中无法拦截实例化，因此在 `__init__` 级别处理。使用 `__init_subclass__` 不合适（它在类定义时调用，非实例化时）。正确方案是利用 pydantic 自身的 validator 机制——pydantic 的 `ValidationError` 会在实例化时自动抛出，我们需要在调用侧捕获并包装。
+
+**两种可选方案**：
+
+1. **方案 A（推荐）**：在 `Event.__init__` 中 `try/except` 包装
+
+```python
+# 伪代码
+class Event(pydantic.BaseModel):
+    def __init__(self, **data):
+        try:
+            super().__init__(**data)
+        except pydantic.ValidationError as e:
+            raise EventValidationError(str(e)) from e
+```
+
+2. **方案 B**：不在 Event 内包装，而是在调用侧（Dispatcher.emit / 用户代码）捕获
+
+**选择方案 A 的理由**：Event 是用户直接实例化的类，在 Event 内部包装可以保证无论用户在哪里创建 Event 实例都能得到统一的 `EventValidationError`，无需 Dispatcher 额外处理。
+
+---
+
+### C-002 内部逻辑（Dispatcher）
+
+#### 8.2.1 `_inject_metadata(self, event: Event) -> None`
+
+**目标**：在 `emit()` 时为事件注入 `event_id` 和 `timestamp`。
+
+```python
+# 伪代码
+def _inject_metadata(self, event: Event) -> None:
+    # frozen model 需通过 object.__setattr__ 绕过保护
+    object.__setattr__(event, "event_id", self._event_id_generator())
+    object.__setattr__(event, "timestamp", self._timestamp_generator())
+```
+
+**复杂度**：O(1)
+
+**关键点**：
+
+- `event_id_generator` 默认为自增计数器（`itertools.count().__next__` 或等价实现）
+- `timestamp_generator` 默认为 `time.time`
+- 用户可通过构造参数替换生成器
+
+#### 8.2.2 `Dispatcher.emit()` 内部流程
+
+**目标**：同步分发事件，处理递归事件队列。
+
+```python
+# 伪代码
+def emit(self, event: Event) -> dict:
+    # 1. 状态检查
+    if self._is_shutting_down:
+        raise ShutdownTimeoutError("Dispatcher 已关闭")
+
+    # 2. 注入元数据
+    self._inject_metadata(event)
+
+    # 3. 判断是否为递归调用
+    #    使用 _is_emitting 标志区分首次调用和递归调用
+    if self._is_emitting:
+        # 递归调用：入队，由外层 emit 消费
+        self._queue.put(event)
+        return {}
+
+    # 4. 首次调用：进入分发循环
+    self._is_emitting = True
+    merged_result: dict = {}
+    try:
+        # 处理当前事件
+        result = self._dispatch_single(event)
+        _merge_dict(merged_result, result)
+
+        # 消费队列中的递归事件
+        while not self._queue.is_empty():
+            queued_event = self._queue.get()
+            result = self._dispatch_single(queued_event)
+            _merge_dict(merged_result, result)
+    finally:
+        self._is_emitting = False
+
+    return merged_result
+```
+
+#### 8.2.3 `_dispatch_single(self, event: Event) -> dict`（内部方法）
+
+**目标**：分发单个事件给所有匹配的监听器。
+
+```python
+# 伪代码
+def _dispatch_single(self, event: Event) -> dict:
+    # 1. 获取分层执行计划
+    layers = self._listener_store.resolve_order(type(event))
+
+    merged_result: dict = {}
+    # 2. 按优先级层依次执行
+    for layer in layers:
+        for entry in layer:
+            result = self._execute_listener(entry, event)
+            if result is not None:
+                _merge_dict(merged_result, result)
+
+    return merged_result
+```
+
+#### 8.2.4 `_execute_listener(self, entry: ListenerEntry, event: Event) -> dict | None`（内部方法）
+
+**目标**：执行单个监听器，处理返回值验证和异常。
+
+```python
+# 伪代码
+def _execute_listener(self, entry: ListenerEntry, event: Event) -> dict | None:
+    try:
+        result = entry.callback(event)
+    except Exception as exc:
+        # 构建 ExecutionContext（仅在异常时构建）
+        ctx = ExecutionContext(
+            event=event,
+            listener_name=entry.name,
+            listener_callback=entry.callback,
+            retry_count=0,
+            event_type=type(event),  # 实际应为 resolve_order 返回时确定的 MRO 层级
+        )
+        return self._error_handler.handle(exc, event, entry, ctx)
+
+    # 返回值验证
+    if result is None:
+        return None
+    if not isinstance(result, dict):
+        raise TypeError(
+            f"监听器 {entry.name} 返回非字典值: {type(result)}"
+        )
+    return result
+```
+
+**备注**：`event_type` 字段应为 `resolve_order` 返回时确定的匹配 MRO 层级，而非 `type(event)`。实际实现中需要将 MRO 匹配类型从 `resolve_order` 传递到此方法。具体方案在实现阶段确定（可选方案：`resolve_order` 返回包含 `event_type` 的元组，或者 `_dispatch_single` 传递额外参数）。
+
+#### 8.2.5 `_merge_dict(target: dict, source: dict) -> None`（模块级辅助函数）
+
+**目标**：合并监听器返回的字典，键冲突时抛出 `KeyConflictError`。
+
+```python
+# 伪代码
+def _merge_dict(target: dict, source: dict) -> None:
+    conflicts = set(target.keys()) & set(source.keys())
+    if conflicts:
+        raise KeyConflictError(f"键冲突: {conflicts}")
+    target.update(source)
+```
+
+**复杂度**：O(min(|target|, |source|)) 用于冲突检测
+
+#### 8.2.6 `AsyncDispatcher.emit()` 内部流程
+
+**目标**：异步分发事件，同优先级层通过 `asyncio.gather()` 并行执行。
+
+```python
+# 伪代码
+async def emit(self, event: Event) -> dict:
+    # 1-3 同 Dispatcher.emit()（状态检查、注入、递归判断）
+    ...
+
+    # 4. 首次调用：进入分发循环
+    self._is_emitting = True
+    merged_result: dict = {}
+    try:
+        result = await self._dispatch_single(event)
+        _merge_dict(merged_result, result)
+
+        while not self._queue.is_empty():
+            queued_event = await self._queue.get()
+            result = await self._dispatch_single(queued_event)
+            _merge_dict(merged_result, result)
+    finally:
+        self._is_emitting = False
+
+    return merged_result
+```
+
+#### 8.2.7 `AsyncDispatcher._dispatch_single()` 内部差异
+
+```python
+# 伪代码 — 与同步版的唯一区别：同层 gather
+async def _dispatch_single(self, event: Event) -> dict:
+    layers = self._listener_store.resolve_order(type(event))
+
+    merged_result: dict = {}
+    for layer in layers:
+        # 同优先级层并行执行
+        results = await asyncio.gather(
+            *(self._execute_listener(entry, event) for entry in layer)
+        )
+        for result in results:
+            if result is not None:
+                _merge_dict(merged_result, result)
+
+    return merged_result
+```
+
+#### 8.2.8 `Dispatcher.shutdown()` / `AsyncDispatcher.shutdown()` 内部流程
+
+```python
+# 伪代码（同步版）
+def shutdown(self, *, timeout: float | None = None) -> None:
+    if self._is_shutting_down:
+        return  # 幂等：已关闭则直接返回
+
+    self._is_shutting_down = True
+
+    # 等待当前 emit 完成（如果有正在执行的 emit）
+    # 同步模式下 emit 是阻塞的，shutdown 只能在 emit 外部调用
+    # 因此到达此处时 _is_emitting 一定为 False（单线程保证）
+    # timeout 主要用于异步版本，同步版可选保留参数签名以保持对称
+
+    # 清理队列中残余事件（如有）
+    while not self._queue.is_empty():
+        _ = self._queue.get()
+```
+
+```python
+# 伪代码（异步版）
+async def shutdown(self, *, timeout: float | None = None) -> None:
+    if self._is_shutting_down:
+        return
+
+    self._is_shutting_down = True
+
+    # 等待队列排空
+    if timeout is not None:
+        try:
+            await asyncio.wait_for(self._drain_queue(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise ShutdownTimeoutError(
+                f"停机超时: {timeout}s 内未完成"
+            ) from None
+    else:
+        await self._drain_queue()
+
+async def _drain_queue(self) -> None:
+    while not self._queue.is_empty():
+        event = await self._queue.get()
+        await self._dispatch_single(event)
+```
+
+**关键点**：
+
+- `shutdown` 是幂等的：首次调用后设置 `_is_shutting_down = True`，后续调用直接返回（不抛异常）
+- 同步版本中 `timeout` 参数实际无意义（单线程不存在等待问题），但保留签名以保持同步/异步 API 对称
+- 异步版本使用 `asyncio.wait_for` 实现超时控制
+
+#### 8.2.9 `_is_emitting` 递归保护机制
+
+**目标**：防止监听器中 `emit()` 导致无限递归。
+
+**工作原理**：
+
+1. 首次 `emit()` 调用设置 `_is_emitting = True`
+2. 如果监听器在处理中再次调用 `emit()`，检测到 `_is_emitting == True`，将新事件放入 `EventQueue` 而非立即递归
+3. 首次 `emit()` 在处理完当前事件后，循环消费队列中的所有递归事件
+4. 队列为空后，设置 `_is_emitting = False`
+
+**同步模式下的单线程保证**：由于 Python GIL 和同步执行模型，`_is_emitting` 不需要加锁。
+
+**异步模式下的协程安全**：单个 `AsyncDispatcher` 实例在同一事件循环中使用。`_is_emitting` 在 `await` 点之间不会被其他协程修改（因为协程切换仅发生在 `await` 点）。但如果两个独立的 `emit()` 协程并发调用（如 `asyncio.gather(d.emit(e1), d.emit(e2))`），需要额外考虑。
+
+**并发 emit 的处理**（草稿，待实现阶段确定）：
+
+- 方案 A：使用 `asyncio.Lock` 保证同一时间只有一个 `emit` 在执行
+- 方案 B：允许并发，每次 `emit` 使用独立的队列实例
+
+> **悬置项**：异步并发 `emit` 的确切行为需在实现阶段验证。建议实现时先用 `asyncio.Lock` 串行化，如性能不可接受再考虑方案 B。记录至 TODO.md。
+
+---
+
+### C-003 内部逻辑（ListenerStore）
+
+#### 8.3.1 内部数据结构
+
+```python
+# 伪代码
+class ListenerStore:
+    def __init__(self):
+        # 事件类型 → 监听器列表
+        self._store: dict[type[Event], list[ListenerEntry]] = {}
+        # callback → 已注册的事件类型集合（用于反查）
+        self._callback_events: dict[Callable, set[type[Event]]] = {}
+```
+
+**`_callback_events` 的作用**：
+
+- `remove(None, callback)` 需要查找 callback 注册在哪些事件上 → O(1) 查找
+- `add()` 时检查 `after` 引用的 callback 是否已注册 → O(1) 查找
+- 维护成本：`add()` 和 `remove()` 时同步更新
+
+#### 8.3.2 `resolve_order()` 算法
+
+**输入**：`event_type: type[Event]`
+
+**输出**：`list[list[ListenerEntry]]`（外层 = 优先级层，内层 = 拓扑排序后的执行序列）
+
+**算法步骤**：
+
+```
+1. MRO 展开
+   对 event_type.__mro__ 中每个类型 T（排除 object 和非 Event 的类型）：
+     收集 self._store[T] 中的所有 ListenerEntry
+
+2. 去重
+   同一 callback 可能通过不同 MRO 层级匹配多次，保留所有匹配（不去重）
+   — 这是 §7 契约的 Post 条件要求
+
+3. 按 priority 分组
+   将所有收集到的 ListenerEntry 按 priority 值分组
+   排序方式：priority 值从大到小
+
+4. 组内拓扑排序
+   对每个优先级组：
+     构建 DAG：
+       节点 = 该组内的 ListenerEntry
+       边 = entry.after 中引用的 callback → 引用方
+       （即如果 A.after 包含 B.callback，则 B → A）
+     执行拓扑排序（Kahn 算法）
+     如果检测到环 → 抛出 CyclicDependencyError（防御性）
+
+5. 组合
+   将各优先级组的拓扑排序结果组合为二维列表返回
+```
+
+**复杂度**：
+
+- 时间：O(L × M) 其中 L = 匹配的监听器总数，M = MRO 链长度（通常 ≤ 5）
+- 拓扑排序：O(V + E) 其中 V = 单组内监听器数，E = after 边数
+- 总体：O(M × L + V + E)，实际项目中 L、V、E 均很小
+
+#### 8.3.3 组内拓扑排序（Kahn 算法）
+
+```python
+# 伪代码
+def _topological_sort(entries: list[ListenerEntry]) -> list[ListenerEntry]:
+    # 构建 callback → entry 的映射
+    callback_to_entry: dict[Callable, ListenerEntry] = {
+        e.callback: e for e in entries
+    }
+
+    # 计算入度
+    in_degree: dict[Callable, int] = {e.callback: 0 for e in entries}
+    for entry in entries:
+        for dep in entry.after:
+            if dep in callback_to_entry:
+                # dep → entry 的边（dep 必须在 entry 之前）
+                in_degree[entry.callback] += 1
+
+    # Kahn 算法
+    queue = deque(
+        e for e in entries if in_degree[e.callback] == 0
+    )
+    result: list[ListenerEntry] = []
+
+    while queue:
+        current = queue.popleft()
+        result.append(current)
+        # 找到所有依赖 current 的 entry
+        for entry in entries:
+            if current.callback in entry.after:
+                in_degree[entry.callback] -= 1
+                if in_degree[entry.callback] == 0:
+                    queue.append(entry)
+
+    if len(result) != len(entries):
+        raise CyclicDependencyError("检测到循环依赖")
+
+    return result
+```
+
+**注意**：`entry.after` 中的 callback 可能不在当前优先级组内（注册在不同优先级或不同事件类型上）。对于不在当前组内的 `after` 引用，跳过即可（这些依赖在其他优先级层中已经被满足，因为高优先级层先执行）。
+
+#### 8.3.4 `add()` 时的循环依赖检测
+
+**目标**：在注册时检测 `after` 是否引入循环依赖，避免 `resolve_order()` 时才发现。
+
+```python
+# 伪代码
+def add(self, event_types: list[type[Event]], entry: ListenerEntry) -> None:
+    # 1. 检查 after 引用的回调是否已注册
+    for dep in entry.after:
+        if dep not in self._callback_events:
+            raise ValueError(f"after 引用了未注册的回调: {dep.__qualname__}")
+
+    # 2. 循环依赖检测（DFS）
+    #    从新 entry 出发，沿 after 链向上遍历，检查是否能回到 entry 自身
+    self._check_cycle(entry)
+
+    # 3. 添加到存储
+    for event_type in event_types:
+        if event_type not in self._store:
+            self._store[event_type] = []
+        self._store[event_type].append(entry)
+
+    # 4. 更新反查索引
+    if entry.callback not in self._callback_events:
+        self._callback_events[entry.callback] = set()
+    self._callback_events[entry.callback].update(event_types)
+```
+
+#### 8.3.5 循环依赖检测（DFS）
+
+```python
+# 伪代码
+def _check_cycle(self, new_entry: ListenerEntry) -> None:
+    """从 new_entry 的 after 依赖出发，DFS 检查是否存在回到 new_entry 的环。"""
+    visited: set[Callable] = set()
+
+    def dfs(callback: Callable) -> bool:
+        if callback == new_entry.callback:
+            return True  # 找到环
+        if callback in visited:
+            return False
+        visited.add(callback)
+
+        # 查找 callback 对应的 entry 的 after 列表
+        # 需要从所有事件类型中搜索该 callback 的 entry
+        for entries in self._store.values():
+            for entry in entries:
+                if entry.callback == callback:
+                    for dep in entry.after:
+                        if dfs(dep):
+                            return True
+                    break  # 同一 callback 的 after 列表相同，找到一个即可
+        return False
+
+    for dep in new_entry.after:
+        if dfs(dep):
+            raise CyclicDependencyError(
+                f"检测到循环依赖: {new_entry.name} -> ... -> {new_entry.name}"
+            )
+```
+
+**复杂度**：O(V + E)，V = 已注册的 callback 总数，E = after 边总数
+
+#### 8.3.6 `remove()` 时的被依赖检查
+
+**目标**：移除监听器前检查是否有其他监听器依赖它（通过 `after` 引用）。
+
+```python
+# 伪代码
+def remove(self, event_types: list[type[Event]] | None, callback: Callable | None) -> None:
+    # 1. 参数校验
+    if event_types is None and callback is None:
+        raise ValueError("event_types 和 callback 不可同时为 None")
+
+    # 2. 确定要移除的范围
+    if event_types is not None and callback is not None:
+        # 模式 1: 从指定事件移除指定回调
+        targets = [(et, callback) for et in event_types]
+    elif event_types is not None:
+        # 模式 2: 从指定事件移除所有回调
+        targets = [
+            (et, e.callback)
+            for et in event_types
+            for e in self._store.get(et, [])
+        ]
+    else:
+        # 模式 3: 从所有事件移除指定回调
+        targets = [
+            (et, callback)
+            for et in self._callback_events.get(callback, set())
+        ]
+
+    # 3. 被依赖检查
+    callbacks_to_remove = {cb for _, cb in targets}
+    for entries in self._store.values():
+        for entry in entries:
+            if entry.callback not in callbacks_to_remove:
+                # 此 entry 不在移除范围内
+                deps_broken = set(entry.after) & callbacks_to_remove
+                if deps_broken:
+                    names = [d.__qualname__ for d in deps_broken]
+                    raise ValueError(
+                        f"无法移除: {names} 被 {entry.name} 的 after 依赖引用"
+                    )
+
+    # 4. 执行移除
+    for et, cb in targets:
+        if et in self._store:
+            self._store[et] = [
+                e for e in self._store[et] if e.callback != cb
+            ]
+            if not self._store[et]:
+                del self._store[et]
+
+    # 5. 更新反查索引
+    for _, cb in targets:
+        if cb in self._callback_events:
+            for et, _ in targets:
+                self._callback_events[cb].discard(et)
+            if not self._callback_events[cb]:
+                del self._callback_events[cb]
+```
+
+---
+
+### C-004 内部逻辑（EventQueue）
+
+#### 8.4.1 EventQueue（同步）
+
+```python
+# 伪代码
+class EventQueue:
+    def __init__(self, max_size: int | None = None):
+        self._queue: deque[Event] = deque()
+        self._max_size = max_size
+
+    def put(self, event: Event) -> None:
+        if self._max_size is not None and len(self._queue) >= self._max_size:
+            raise QueueFullError(
+                f"队列已满: {len(self._queue)}/{self._max_size}"
+            )
+        self._queue.append(event)
+
+    def get(self) -> Event:
+        return self._queue.popleft()  # 空时抛 IndexError
+
+    def is_empty(self) -> bool:
+        return len(self._queue) == 0
+```
+
+**复杂度**：`put` O(1)、`get` O(1)、`is_empty` O(1)
+
+#### 8.4.2 AsyncEventQueue（异步）
+
+```python
+# 伪代码
+class AsyncEventQueue:
+    def __init__(self, max_size: int | None = None):
+        maxsize = 0 if max_size is None else max_size
+        self._queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=maxsize)
+
+    async def put(self, event: Event) -> None:
+        await self._queue.put(event)  # 满时阻塞
+
+    async def get(self) -> Event:
+        return await self._queue.get()  # 空时阻塞
+
+    def is_empty(self) -> bool:
+        return self._queue.empty()
+```
+
+**复杂度**：与 `asyncio.Queue` 一致，所有操作 O(1) 摊还
+
+**实现简洁性**：两个队列类均为薄封装，无复杂逻辑。
+
+---
+
+### C-005 内部逻辑（ErrorHandler）
+
+#### 8.5.1 `handle()` 策略分发
+
+```python
+# 伪代码
+class ErrorHandler:
+    def handle(
+        self,
+        exception: Exception,
+        event: Event,
+        listener: ListenerEntry,
+        context: ExecutionContext,
+    ) -> dict | None:
+        if self._strategy == ErrorStrategy.PROPAGATE:
+            raise exception
+
+        if self._strategy == ErrorStrategy.CAPTURE:
+            return self._handle_capture(exception, event, listener, context)
+
+        if self._strategy == ErrorStrategy.RETRY:
+            return self._handle_retry(exception, event, listener, context)
+```
+
+#### 8.5.2 `_handle_capture()` 内部方法
+
+```python
+# 伪代码
+def _handle_capture(
+    self,
+    exception: Exception,
+    event: Event,
+    listener: ListenerEntry,
+    context: ExecutionContext,
+) -> dict:
+    logger.error(
+        "监听器 {name} 处理事件 {event_id} 时抛出异常: {exc}",
+        name=listener.name,
+        event_id=event.event_id,
+        exc=exception,
+    )
+
+    # 可选：写入死信队列
+    if self._dead_letter_queue is not None:
+        self._dead_letter_queue.put(
+            DeadLetterEntry(
+                event=event,
+                exception=exception,
+                context=context,
+                timestamp=time.time(),
+            )
+        )
+
+    return {
+        "__error__": {
+            "listener": listener.name,
+            "exception": str(exception),
+        }
+    }
+```
+
+#### 8.5.3 `_handle_retry()` 内部方法
+
+```python
+# 伪代码
+def _handle_retry(
+    self,
+    exception: Exception,
+    event: Event,
+    listener: ListenerEntry,
+    context: ExecutionContext,
+) -> dict | None:
+    last_exception = exception
+
+    for attempt in range(1, self._retry_config.max_retries + 1):
+        # 构建新的 ExecutionContext（更新 retry_count）
+        retry_ctx = ExecutionContext(
+            event=context.event,
+            listener_name=context.listener_name,
+            listener_callback=context.listener_callback,
+            retry_count=attempt,
+            event_type=context.event_type,
+        )
+
+        # should_retry 判断
+        if self._retry_config.should_retry is not None:
+            if not self._retry_config.should_retry(last_exception, retry_ctx):
+                logger.warning(
+                    "should_retry 拒绝重试: {name}, attempt={attempt}",
+                    name=listener.name,
+                    attempt=attempt,
+                )
+                break
+
+        # 执行重试
+        try:
+            result = listener.callback(event)
+            logger.info(
+                "重试成功: {name}, attempt={attempt}",
+                name=listener.name,
+                attempt=attempt,
+            )
+            return result  # 重试成功，返回正常结果
+        except Exception as exc:
+            last_exception = exc
+            logger.warning(
+                "重试失败: {name}, attempt={attempt}, exc={exc}",
+                name=listener.name,
+                attempt=attempt,
+                exc=exc,
+            )
+
+    # 所有重试耗尽或 should_retry 拒绝
+    logger.error(
+        "重试耗尽: {name}, 最终异常: {exc}",
+        name=listener.name,
+        exc=last_exception,
+    )
+
+    # 写入死信队列（如启用）
+    if self._dead_letter_queue is not None:
+        final_ctx = ExecutionContext(
+            event=context.event,
+            listener_name=context.listener_name,
+            listener_callback=context.listener_callback,
+            retry_count=self._retry_config.max_retries,
+            event_type=context.event_type,
+        )
+        self._dead_letter_queue.put(
+            DeadLetterEntry(
+                event=event,
+                exception=last_exception,
+                context=final_ctx,
+                timestamp=time.time(),
+            )
+        )
+
+    return {
+        "__error__": {
+            "listener": listener.name,
+            "exception": str(last_exception),
+        }
+    }
+```
+
+**关键点**：
+
+- `should_retry` 每次重试前调用，传入最新的异常和更新后的 `ExecutionContext`
+- 重试成功则返回正常值，短路退出
+- 重试耗尽后进入死信队列（如启用），返回错误字典
+- 异步版本需要将 `listener.callback(event)` 替换为 `await listener.callback(event)`
+
+---
+
+### C-006 内部逻辑（DeadLetterQueue）
+
+#### 8.6.1 完整实现
+
+```python
+# 伪代码
+class DeadLetterQueue:
+    def __init__(self):
+        self._queue: deque[DeadLetterEntry] = deque()
+
+    def put(self, entry: DeadLetterEntry) -> None:
+        self._queue.append(entry)
+
+    def get_all(self) -> list[DeadLetterEntry]:
+        return list(self._queue)  # 返回副本
+
+    def clear(self) -> None:
+        self._queue.clear()
+
+    def __len__(self) -> int:
+        return len(self._queue)
+```
+
+**复杂度**：`put` O(1)、`get_all` O(n)、`clear` O(n)、`__len__` O(1)
+
+**实现简洁性**：DeadLetterQueue 是最薄的封装层，所有操作直接委托给 `deque`。
+
+---
+
+### 8.7 悬置项与待确认事项
+
+| 编号 | 事项 | 影响范围 | 建议处理时机 |
+|------|------|----------|-------------|
+| S-001 | 异步并发 `emit` 的行为（`asyncio.Lock` vs 独立队列） | C-002 AsyncDispatcher | 实现阶段确定，先用 Lock |
+| S-002 | `resolve_order` 中 MRO 匹配层级信息如何传递到 `_execute_listener` 的 `ExecutionContext.event_type` | C-002, C-003 | 实现阶段确定（元组 or 额外参数） |
+| S-003 | `_handle_retry` 的异步版本需 `await` 调用 | C-005 | 实现时处理（可能需要 `AsyncErrorHandler` 或策略模式） |
