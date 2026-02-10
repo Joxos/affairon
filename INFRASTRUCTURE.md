@@ -16,7 +16,7 @@ eventd 是一个支持同步/异步模式的 Python 事件驱动框架。系统�
 │  │  C-001        │    │  C-002  Dispatcher                  │   │
 │  │  Event        │◄───│                                     │   │
 │  │  (事件模型)    │    │  BaseDispatcher                     │   │
-│  └───────────────┘    │    ├── SyncDispatcher                │   │
+│  └───────────────┘    │    ├── Dispatcher                    │   │
 │                       │    └── AsyncDispatcher               │   │
 │                       └──────┬──────────┬──────────┬────────┘   │
 │                              │          │          │            │
@@ -84,9 +84,10 @@ eventd 是一个支持同步/异步模式的 Python 事件驱动框架。系统�
 ### C-002: Dispatcher（事件管理器）
 
 - **职责**：事件分发核心。提供 `on()`、`register()`、`unregister()`、`emit()`、`shutdown()` 等公开 API。协调 ListenerStore、EventQueue、ErrorHandler 完成事件的注册、分发、异常处理和生命周期管理
+- **作用说明**：Dispatcher 是用户与框架交互的唯一入口。用户通过 Dispatcher 注册监听器、提交事件、配置异常策略和控制生命周期。Dispatcher 本身不直接处理存储、队列和异常，而是将这些职责委托给内部服务层组件
 - **覆盖需求**：F-002, F-003, F-003A, F-004, F-005, F-008, F-008-SYNC, F-009（配置入口）, F-010（日志调用点）
 - **依赖**：C-001, C-003, C-004, C-005
-- **对外暴露**：`BaseDispatcher`（抽象基类）、`SyncDispatcher`、`AsyncDispatcher`、`default_dispatcher`（模块级 `SyncDispatcher` 实例）
+- **对外暴露**：`BaseDispatcher`（抽象基类）、`Dispatcher`、`AsyncDispatcher`、`default_dispatcher`（模块级 `Dispatcher` 实例）
 - **关键设计**：
   - `BaseDispatcher`（抽象基类）：封装共用逻辑
     - 构造参数管理（`error_strategy`、`retry_config`、`dead_letter_enabled`、`queue_max_size`、`event_id_generator`、`timestamp_generator`）
@@ -94,18 +95,19 @@ eventd 是一个支持同步/异步模式的 Python 事件驱动框架。系统�
     - 注册/取消注册逻辑（`on()`、`register()`、`unregister()` 委托给 `ListenerStore`）
     - shutdown 状态管理（`_is_shutting_down` 标志）
     - `event_id` / `timestamp` 生成逻辑
-  - `SyncDispatcher(BaseDispatcher)`：
-    - `emit()` — 同步阻塞执行，持有 `SyncEventQueue`
+  - `Dispatcher(BaseDispatcher)`：
+    - `emit()` — 同步阻塞执行，持有 `EventQueue`
     - `shutdown()` — 同步停机
   - `AsyncDispatcher(BaseDispatcher)`：
     - `async emit()` — 异步分层并行执行（同优先级 `gather`），持有 `AsyncEventQueue`
     - `async shutdown()` — 异步停机
-  - `default_dispatcher`：模块级 `SyncDispatcher` 实例，在 `__init__.py` 中创建
+  - `default_dispatcher`：模块级 `Dispatcher` 实例，在 `__init__.py` 中创建
 - **文件**：`src/eventd/dispatcher.py`
 
 ### C-003: ListenerStore（监听器存储）
 
 - **职责**：管理监听器的注册、取消注册、按事件类型 + MRO 查找、priority/after 拓扑排序
+- **作用说明**：ListenerStore 是 Dispatcher 的内部组件，用户不直接访问。它负责维护事件类型到监听器列表的映射关系，并在 emit 时提供按 MRO、priority、after 排序后的分层执行计划
 - **覆盖需求**：F-002, F-003, F-003A 的存储与查询逻辑
 - **依赖**：无（叶子节点）
 - **对外暴露**：`ListenerStore`、`ListenerEntry`
@@ -113,8 +115,8 @@ eventd 是一个支持同步/异步模式的 Python 事件驱动框架。系统�
   - `ListenerEntry`（`dataclass`）：
     - `callback: Callable` — 监听器回调函数
     - `priority: int` — 优先级（越大越高）
-    - `after: list[str]` — 依赖的监听器名称列表
-    - `name: str` — 监听器名称（默认为函数名 `callback.__name__`）
+    - `after: list[Callable]` — 依赖的监听器回调函数列表（这些监听器必须在当前监听器之前执行）
+    - `name: str` — 可选调试标签（默认为 `callback.__qualname__`），仅用于日志和错误消息，不参与业务逻辑
   - `ListenerStore`：
     - 内部数据结构：`dict[type[Event], list[ListenerEntry]]`
     - `add(event_types, entry)` — 注册监听器，执行 after 引用检查和循环依赖检测
@@ -127,12 +129,13 @@ eventd 是一个支持同步/异步模式的 Python 事件驱动框架。系统�
 ### C-004: EventQueue（事件队列）
 
 - **职责**：管理事件递归触发时的执行队列，控制递归深度
+- **作用说明**：EventQueue 是 Dispatcher 的内部组件，用户不直接访问。当监听器在处理事件时触发新事件（递归事件），新事件不会立即递归执行，而是被放入 EventQueue 由 Dispatcher 在当前事件处理完毕后消费，从而避免栈溢出
 - **覆盖需求**：F-006
 - **依赖**：无（叶子节点）
-- **对外暴露**：`SyncEventQueue`、`AsyncEventQueue`
+- **对外暴露**：`EventQueue`、`AsyncEventQueue`
 - **关键设计**：
-  - `SyncEventQueue`：
-    - 内部数据结构：`list`（用作 FIFO 队列）
+  - `EventQueue`：
+    - 内部数据结构：`collections.deque`（无 maxlen，手动检查 `max_size`）
     - `put(event)` — 追加事件，队列满时抛出 `QueueFullError`
     - `get() -> Event` — 取出下一个事件
     - `is_empty() -> bool`
@@ -149,24 +152,37 @@ eventd 是一个支持同步/异步模式的 Python 事件驱动框架。系统�
 ### C-005: ErrorHandler（异常处理）
 
 - **职责**：根据策略（propagate / capture / retry）处理监听器执行异常
+- **作用说明**：ErrorHandler 是 Dispatcher 的内部组件，由 `BaseDispatcher.__init__()` 在构造时创建，用户不直接访问。用户通过 Dispatcher 构造参数（`error_strategy`、`retry_config`、`dead_letter_enabled`）间接配置 ErrorHandler 的行为。Dispatcher 在 `emit()` 的 except 块中调用 `ErrorHandler.handle()`
 - **覆盖需求**：F-009
 - **依赖**：C-006（当 `dead_letter_enabled=True` 时将失败事件转入死信队列）
-- **对外暴露**：`ErrorHandler`、`RetryConfig`
+- **对外暴露**：`ErrorHandler`、`RetryConfig`、`ErrorStrategy`（`StrEnum`）
 - **关键设计**：
+  - `ErrorStrategy`（`StrEnum`）：
+    - `PROPAGATE = "propagate"` — 直接 re-raise
+    - `CAPTURE = "capture"` — 记录日志，返回异常信息
+    - `RETRY = "retry"` — 立即重试
   - `ErrorHandler`：
-    - 构造参数：`error_strategy`、`retry_config`、`dead_letter_queue`（可选）
-    - `handle(exception, event, listener, context) -> ErrorResult` — 按策略处理异常，返回处理结果
+    - 构造参数：`error_strategy: ErrorStrategy`、`retry_config`、`dead_letter_queue`（可选）
+    - `handle(exception, event, listener, context: ExecutionContext) -> dict | None` — 按策略处理异常，返回处理结果
     - propagate 策略：直接 re-raise
     - capture 策略：记录日志，返回包含异常信息的字典
     - retry 策略：立即重试至 `max_retries`，支持 `should_retry` 条件判断，最终失败转入死信队列（如启用）或返回异常信息
   - `RetryConfig`（`dataclass`）：
     - `max_retries: int`
-    - `should_retry: Callable[[Exception, dict], bool] | None` — 可选条件函数
+    - `should_retry: Callable[[Exception, ExecutionContext], bool] | None` — 可选条件函数
+  - `ExecutionContext`（`dataclass`）：
+    - `event: Event` — 当前处理的事件
+    - `listener_name: str` — 监听器名称（`callback.__qualname__`）
+    - `listener_callback: Callable` — 监听器回调函数
+    - `retry_count: int` — 当前重试次数（0 = 首次执行）
+    - `event_type: type[Event]` — 匹配的 MRO 层级事件类型
+    - **构建时机**：仅在 `emit()` 的 except 块中构建，不预先创建（性能优化）
 - **文件**：`src/eventd/error_handler.py`
 
 ### C-006: DeadLetterQueue（死信队列）
 
 - **职责**：存储处理失败的事件及其上下文信息，提供读取和管理 API
+- **作用说明**：DeadLetterQueue 是 ErrorHandler 的内部组件，用户通过 Dispatcher 间接访问。当监听器执行失败且异常策略为 capture/retry 时，失败的事件和上下文信息被存入 DeadLetterQueue，供用户后续查阅和处理
 - **覆盖需求**：F-007
 - **依赖**：无（叶子节点）
 - **对外暴露**：`DeadLetterQueue`、`DeadLetterEntry`
@@ -174,10 +190,10 @@ eventd 是一个支持同步/异步模式的 Python 事件驱动框架。系统�
   - `DeadLetterEntry`（`dataclass`）：
     - `event: Event` — 失败的事件实例
     - `exception: Exception` — 导致失败的异常
-    - `context: dict` — 处理时的上下文信息（如监听器名称、重试次数等）
+    - `context: ExecutionContext` — 处理时的执行上下文
     - `timestamp: float` — 进入死信队列的时间
   - `DeadLetterQueue`：
-    - 内部数据结构：`list[DeadLetterEntry]`
+    - 内部数据结构：`collections.deque`（无 maxlen，为未来多线程双端读取预留）
     - `put(entry)` — 添加条目
     - `get_all() -> list[DeadLetterEntry]` — 获取所有条目
     - `clear()` — 清空队列
@@ -209,12 +225,12 @@ C-002 Dispatcher       ─── C-001, C-003, C-004, C-005
 src/eventd/
 ├── __init__.py          # 公开 API 导出 + default_dispatcher 实例
 ├── event.py             # C-001: Event 基类
-├── dispatcher.py        # C-002: BaseDispatcher, SyncDispatcher, AsyncDispatcher
+├── dispatcher.py        # C-002: BaseDispatcher, Dispatcher, AsyncDispatcher
 ├── listener.py          # C-003: ListenerStore, ListenerEntry
-├── queue.py             # C-004: SyncEventQueue, AsyncEventQueue
-├── error_handler.py     # C-005: ErrorHandler, RetryConfig
+├── queue.py             # C-004: EventQueue, AsyncEventQueue
+├── error_handler.py     # C-005: ErrorHandler, RetryConfig, ErrorStrategy, ExecutionContext
 ├── dead_letter.py       # C-006: DeadLetterQueue, DeadLetterEntry
-├── exceptions.py        # 自定义异常类 (CyclicDependencyError, KeyConflictError, QueueFullError, ShutdownTimeoutError)
+├── exceptions.py        # 自定义异常类 (EventdError, EventValidationError, CyclicDependencyError, KeyConflictError, QueueFullError, ShutdownTimeoutError)
 └── _types.py            # 共享类型定义 (type aliases)
 ```
 
@@ -244,43 +260,43 @@ src/eventd/
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `event_id` | `Any` | 事件唯一标识，由 Dispatcher 在 `emit()` 时注入 |
-| `timestamp` | `Any` | 事件时间戳，由 Dispatcher 在 `emit()` 时注入 |
+| `event_id` | `int` | 事件唯一标识，由 Dispatcher 在 `emit()` 时注入（默认自增） |
+| `timestamp` | `float` | 事件时间戳，由 Dispatcher 在 `emit()` 时注入（默认 `time.time()`） |
 
 - Pre: 用户构造事件时**不可**传入 `event_id` 或 `timestamp`（框架保留字段）
 - Post: 实例创建成功后，用户自定义字段已通过 pydantic 验证；`event_id` 和 `timestamp` 为 `None`（未注入状态）
 - Inv: `Event` 实例创建后，用户自定义字段不可变（pydantic frozen model 或由用户决定）
 - 副作用: 无
-- 错误: `ValidationError`（pydantic 原生）— 用户自定义字段验证失败
+- 错误: `EventValidationError` — 用户自定义字段验证失败（捕获 pydantic `ValidationError` 后包装为 eventd 自有异常）
 
 ---
 
 ### C-002 API（Dispatcher）
 
-#### `BaseDispatcher.__init__(self, *, error_strategy: str = "propagate", retry_config: RetryConfig | None = None, dead_letter_enabled: bool = False, queue_max_size: int | None = None, event_id_generator: Callable[[], Any] | None = None, timestamp_generator: Callable[[], Any] | None = None) -> None`
+#### `BaseDispatcher.__init__(self, *, error_strategy: ErrorStrategy = ErrorStrategy.PROPAGATE, retry_config: RetryConfig | None = None, dead_letter_enabled: bool = False, queue_max_size: int | None = None, event_id_generator: Callable[[], int] | None = None, timestamp_generator: Callable[[], float] | None = None) -> None`
 
 构造事件管理器。
 
-- Pre: `error_strategy` ∈ `{"propagate", "capture", "retry"}`；当 `error_strategy == "retry"` 时 `retry_config` 不得为 `None`；`queue_max_size` 为正整数或 `None`
+- Pre: `error_strategy` 为 `ErrorStrategy` 枚举值；当 `error_strategy == ErrorStrategy.RETRY` 时 `retry_config` 不得为 `None`；`queue_max_size` 为正整数或 `None`
 - Post: 实例已创建，内部 `ListenerStore`、`ErrorHandler`、`EventQueue` 已初始化；`_is_shutting_down == False`
 - Inv: 构造参数在实例生命周期内不可变
 - 副作用: 无
-- 错误: `ValueError` — `error_strategy` 非法，或 `retry` 策略但未提供 `retry_config`
+- 错误: `ValueError` — `retry` 策略但未提供 `retry_config`，或 `queue_max_size` 非正整数
 
-#### `BaseDispatcher.on(self, *event_types: type[Event], priority: int = 0, after: list[str] | None = None) -> Callable[[F], F]`
+#### `BaseDispatcher.on(self, *event_types: type[Event], priority: int = 0, after: list[Callable] | None = None) -> Callable[[F], F]`
 
 装饰器方式注册监听器。`F` 为被装饰函数的类型。
 
-- Pre: `event_types` 中每个元素为 `Event` 的子类；回调函数类型与 Dispatcher 类型匹配（`SyncDispatcher` → 同步函数，`AsyncDispatcher` → 异步函数）；`after` 中引用的监听器名称已注册到**任意事件**；`after` 不形成循环依赖
+- Pre: `event_types` 中每个元素为 `Event` 的子类；回调函数类型与 Dispatcher 类型匹配（`Dispatcher` → 同步函数，`AsyncDispatcher` → 异步函数）；`after` 中引用的回调函数已注册到**任意事件**；`after` 不形成循环依赖
 - Post: 回调函数已注册到所有指定事件类型；返回原始函数（不修改）
 - Inv: 注册操作不影响已注册的其他监听器
 - 副作用: 修改内部 `ListenerStore` 状态
 - 错误:
-  - `ValueError` — `after` 中引用了未注册的监听器名称
+  - `ValueError` — `after` 中引用了未注册的回调函数
   - `CyclicDependencyError` — `after` 形成循环依赖
   - `TypeError` — 回调函数类型与 Dispatcher 类型不匹配（同步 vs 异步）
 
-#### `BaseDispatcher.register(self, event_types: type[Event] | list[type[Event]], callback: Callable, *, priority: int = 0, after: list[str] | None = None) -> None`
+#### `BaseDispatcher.register(self, event_types: type[Event] | list[type[Event]], callback: Callable, *, priority: int = 0, after: list[Callable] | None = None) -> None`
 
 方法调用方式注册监听器。
 
@@ -290,24 +306,32 @@ src/eventd/
 - 副作用: 同 `on()`
 - 错误: 同 `on()`
 
-#### `BaseDispatcher.unregister(self, event_types: type[Event] | list[type[Event]], callback: Callable) -> None`
+#### `BaseDispatcher.unregister(self, event_types: type[Event] | list[type[Event]] | None = None, callback: Callable | None = None) -> None`
 
-取消监听器注册。
+取消监听器注册。支持四种调用模式：
 
-- Pre: `callback` 已注册到所有指定的 `event_types`；移除 `callback` 不会导致其他监听器的 `after` 依赖失效
-- Post: `callback` 已从所有指定事件类型的监听器列表中移除
-- Inv: 取消注册不影响其他已注册的监听器
+| `event_types` | `callback` | 行为 |
+|---------------|------------|------|
+| 有 | 有 | 从指定事件类型中移除指定回调 |
+| 有 | `None` | 从指定事件类型中移除**所有**监听器 |
+| `None` | 有 | 从**所有**事件类型中移除指定回调 |
+| `None` | `None` | 抛出 `ValueError`（无意义调用） |
+
+- Pre: 当同时指定 `event_types` 和 `callback` 时，`callback` 必须已注册到所有指定的 `event_types`；移除操作不会导致其他监听器的 `after` 依赖失效
+- Post: 对应的监听器已从相关事件类型的监听器列表中移除
+- Inv: 取消注册不影响不相关的已注册监听器
 - 副作用: 修改内部 `ListenerStore` 状态
 - 错误:
+  - `ValueError` — `event_types` 和 `callback` 均为 `None`
   - `ValueError` — `callback` 未注册到指定事件类型
-  - `ValueError` — 移除 `callback` 导致其他监听器的 `after` 依赖失效
+  - `ValueError` — 移除操作导致其他监听器的 `after` 依赖失效
 
-#### `SyncDispatcher.emit(self, event: Event) -> dict`
+#### `Dispatcher.emit(self, event: Event) -> dict`
 
 同步提交事件。
 
 - Pre: `event` 为 `Event` 子类的实例；Dispatcher 未处于 shutdown 状态（`_is_shutting_down == False`）
-- Post: `event.event_id` 和 `event.timestamp` 已被赋值；所有匹配的监听器已按 MRO 顺序、priority（高→低）、after 拓扑顺序依次执行；所有监听器返回的字典已合并为一个字典返回；如果监听器在执行中触发新事件，新事件已通过 `SyncEventQueue` 排队并在当前 `emit` 调用内完成处理
+- Post: `event.event_id` 和 `event.timestamp` 已被赋值；所有匹配的监听器已按 MRO 顺序、priority（高→低）、after 拓扑顺序依次执行；所有监听器返回的字典已合并为一个字典返回；如果监听器在执行中触发新事件，新事件已通过 `EventQueue` 排队并在当前 `emit` 调用内完成处理
 - Inv: `event_id` 生成器的调用计数单调递增
 - 副作用: 执行监听器（监听器可能产生任意副作用）；可能修改 `EventQueue` 和 `DeadLetterQueue` 状态；写日志
 - 错误:
@@ -315,19 +339,19 @@ src/eventd/
   - `KeyConflictError` — 合并返回字典时键冲突
   - `QueueFullError` — 递归事件导致队列超出 `max_size`
   - `ShutdownTimeoutError` — Dispatcher 已关闭
-  - 监听器抛出的异常（当 `error_strategy == "propagate"` 时）
+  - 监听器抛出的异常（当 `error_strategy == ErrorStrategy.PROPAGATE` 时）
 
 #### `AsyncDispatcher.emit(self, event: Event) -> dict`
 
 异步提交事件。
 
-- Pre: 同 `SyncDispatcher.emit()`；当前处于 asyncio 事件循环中
-- Post: 同 `SyncDispatcher.emit()`，但同优先级层的监听器通过 `asyncio.gather()` 并行执行，不同优先级层按顺序执行
-- Inv: 同 `SyncDispatcher.emit()`
-- 副作用: 同 `SyncDispatcher.emit()`
-- 错误: 同 `SyncDispatcher.emit()`（`QueueFullError` 不适用于异步模式，异步队列满时阻塞等待）
+- Pre: 同 `Dispatcher.emit()`；当前处于 asyncio 事件循环中
+- Post: 同 `Dispatcher.emit()`，但同优先级层的监听器通过 `asyncio.gather()` 并行执行，不同优先级层按顺序执行
+- Inv: 同 `Dispatcher.emit()`
+- 副作用: 同 `Dispatcher.emit()`
+- 错误: 同 `Dispatcher.emit()`（`QueueFullError` 不适用于异步模式，异步队列满时阻塞等待）
 
-#### `SyncDispatcher.shutdown(self, *, timeout: float | None = None) -> None`
+#### `Dispatcher.shutdown(self, *, timeout: float | None = None) -> None`
 
 同步优雅停机。
 
@@ -341,11 +365,11 @@ src/eventd/
 
 异步优雅停机。
 
-- Pre: 同 `SyncDispatcher.shutdown()`；当前处于 asyncio 事件循环中
-- Post: 同 `SyncDispatcher.shutdown()`
-- Inv: 同 `SyncDispatcher.shutdown()`
-- 副作用: 同 `SyncDispatcher.shutdown()`
-- 错误: 同 `SyncDispatcher.shutdown()`
+- Pre: 同 `Dispatcher.shutdown()`；当前处于 asyncio 事件循环中
+- Post: 同 `Dispatcher.shutdown()`
+- Inv: 同 `Dispatcher.shutdown()`
+- 副作用: 同 `Dispatcher.shutdown()`
+- 错误: 同 `Dispatcher.shutdown()`
 
 ---
 
@@ -358,11 +382,11 @@ src/eventd/
 class ListenerEntry:
     callback: Callable
     priority: int
-    after: list[str]
-    name: str
+    after: list[Callable]
+    name: str  # 可选调试标签，默认 callback.__qualname__
 ```
 
-- Inv: `name` 默认为 `callback.__name__`；`priority` 越大优先级越高；`after` 为监听器名称列表（可为空列表）
+- Inv: `name` 默认为 `callback.__qualname__`，仅用于日志和错误消息，不参与业务逻辑；`priority` 越大优先级越高；`after` 为回调函数列表（可为空列表），引用必须在当前监听器之前执行的监听器
 
 #### `ListenerStore.__init__(self) -> None`
 
@@ -378,23 +402,24 @@ class ListenerEntry:
 
 注册监听器。
 
-- Pre: `event_types` 中每个元素为 `Event` 的子类；`entry.after` 中引用的监听器名称已注册到**任意事件类型**（不限于当前 `event_types`）；`entry.after` 加入后不形成循环依赖
+- Pre: `event_types` 中每个元素为 `Event` 的子类；`entry.after` 中引用的回调函数已注册到**任意事件类型**（不限于当前 `event_types`）；`entry.after` 加入后不形成循环依赖
 - Post: `entry` 已添加到每个指定事件类型的监听器列表
 - Inv: 同一 `callback` 可多次注册到不同事件类型；注册操作不修改已有条目
 - 副作用: 修改内部存储
 - 错误:
-  - `ValueError` — `entry.after` 中引用了未注册的监听器名称
+  - `ValueError` — `entry.after` 中引用了未注册的回调函数
   - `CyclicDependencyError` — `entry.after` 形成循环依赖
 
-#### `ListenerStore.remove(self, event_types: list[type[Event]], callback: Callable) -> None`
+#### `ListenerStore.remove(self, event_types: list[type[Event]] | None, callback: Callable | None) -> None`
 
-取消注册监听器。
+取消注册监听器。支持与 `BaseDispatcher.unregister()` 相同的四种调用模式。
 
-- Pre: `callback` 已注册到所有指定的 `event_types`；移除后不会导致其他监听器的 `after` 依赖失效
-- Post: `callback` 对应的 `ListenerEntry` 已从所有指定事件类型的监听器列表中移除
-- Inv: 移除操作不影响其他已注册的条目
+- Pre: 当同时指定 `event_types` 和 `callback` 时，`callback` 已注册到所有指定的 `event_types`；移除后不会导致其他监听器的 `after` 依赖失效
+- Post: 对应的 `ListenerEntry` 已从相关事件类型的监听器列表中移除
+- Inv: 移除操作不影响不相关的已注册条目
 - 副作用: 修改内部存储
 - 错误:
+  - `ValueError` — `event_types` 和 `callback` 均为 `None`
   - `ValueError` — `callback` 未注册到指定事件类型
   - `ValueError` — 移除导致其他监听器的 `after` 依赖失效
 
@@ -413,7 +438,7 @@ class ListenerEntry:
 
 ### C-004 API（EventQueue）
 
-#### `SyncEventQueue.__init__(self, max_size: int | None = None) -> None`
+#### `EventQueue.__init__(self, max_size: int | None = None) -> None`
 
 构造同步事件队列。
 
@@ -423,27 +448,27 @@ class ListenerEntry:
 - 副作用: 无
 - 错误: 无
 
-#### `SyncEventQueue.put(self, event: Event) -> None`
+#### `EventQueue.put(self, event: Event) -> None`
 
 追加事件到队列。
 
 - Pre: 队列未满（`len(queue) < max_size`，或 `max_size is None`）
 - Post: `event` 已追加到队列尾部；队列长度增加 1
 - Inv: FIFO 顺序保持
-- 副作用: 修改内部队列
+- 副作用: 修改内部 `deque`
 - 错误: `QueueFullError` — 队列已满
 
-#### `SyncEventQueue.get(self) -> Event`
+#### `EventQueue.get(self) -> Event`
 
 取出队列头部事件。
 
 - Pre: 队列非空
 - Post: 返回队列头部事件；队列长度减少 1
 - Inv: FIFO 顺序保持
-- 副作用: 修改内部队列
+- 副作用: 修改内部 `deque`
 - 错误: `IndexError` — 队列为空（调用方应先检查 `is_empty()`）
 
-#### `SyncEventQueue.is_empty(self) -> bool`
+#### `EventQueue.is_empty(self) -> bool`
 
 检查队列是否为空。
 
@@ -497,32 +522,58 @@ class ListenerEntry:
 
 ### C-005 API（ErrorHandler）
 
+#### `ErrorStrategy`（StrEnum）
+
+```python
+class ErrorStrategy(enum.StrEnum):
+    PROPAGATE = "propagate"
+    CAPTURE = "capture"
+    RETRY = "retry"
+```
+
+- Inv: 枚举值不可扩展
+
+#### `ExecutionContext`（dataclass）
+
+```python
+@dataclass
+class ExecutionContext:
+    event: Event
+    listener_name: str        # callback.__qualname__
+    listener_callback: Callable
+    retry_count: int          # 0 = 首次执行
+    event_type: type[Event]   # 匹配的 MRO 层级事件类型
+```
+
+- Inv: 所有字段在创建后不可变（frozen dataclass）
+- **构建时机**：仅在 `emit()` 的 except 块中构建 `ExecutionContext` 实例，不预先创建（性能优化——正常路径零开销）
+
 #### `RetryConfig`（dataclass）
 
 ```python
 @dataclass
 class RetryConfig:
     max_retries: int
-    should_retry: Callable[[Exception, dict], bool] | None = None
+    should_retry: Callable[[Exception, ExecutionContext], bool] | None = None
 ```
 
 - Inv: `max_retries >= 1`；`should_retry` 为 `None` 时表示始终重试（直到达到 `max_retries`）
 
-#### `ErrorHandler.__init__(self, *, error_strategy: str = "propagate", retry_config: RetryConfig | None = None, dead_letter_queue: DeadLetterQueue | None = None) -> None`
+#### `ErrorHandler.__init__(self, *, error_strategy: ErrorStrategy = ErrorStrategy.PROPAGATE, retry_config: RetryConfig | None = None, dead_letter_queue: DeadLetterQueue | None = None) -> None`
 
 构造异常处理器。
 
-- Pre: `error_strategy` ∈ `{"propagate", "capture", "retry"}`；当 `error_strategy == "retry"` 时 `retry_config` 不得为 `None`
+- Pre: 当 `error_strategy == ErrorStrategy.RETRY` 时 `retry_config` 不得为 `None`
 - Post: 实例已创建，策略已配置
 - Inv: 策略在生命周期内不可变
 - 副作用: 无
-- 错误: `ValueError` — 参数非法
+- 错误: `ValueError` — `retry` 策略但未提供 `retry_config`
 
-#### `ErrorHandler.handle(self, exception: Exception, event: Event, listener: ListenerEntry, context: dict) -> dict | None`
+#### `ErrorHandler.handle(self, exception: Exception, event: Event, listener: ListenerEntry, context: ExecutionContext) -> dict | None`
 
 按策略处理监听器异常。
 
-- Pre: `exception` 为监听器执行时抛出的异常；`event` 为当前处理的事件；`listener` 为抛出异常的监听器；`context` 包含执行上下文信息
+- Pre: `exception` 为监听器执行时抛出的异常；`event` 为当前处理的事件；`listener` 为抛出异常的监听器；`context` 为在 except 块中构建的执行上下文
 - Post:
   - propagate: 异常被 re-raise，此方法不返回
   - capture: 返回包含异常信息的字典（如 `{"__error__": {"listener": name, "exception": str(exception)}}`)，日志已记录
@@ -542,11 +593,11 @@ class RetryConfig:
 class DeadLetterEntry:
     event: Event
     exception: Exception
-    context: dict
+    context: ExecutionContext
     timestamp: float
 ```
 
-- Inv: 所有字段在创建后不可变（frozen dataclass 或约定不修改）
+- Inv: 所有字段在创建后不可变（frozen dataclass）
 
 #### `DeadLetterQueue.__init__(self) -> None`
 
@@ -565,7 +616,7 @@ class DeadLetterEntry:
 - Pre: `entry` 为有效的 `DeadLetterEntry` 实例
 - Post: `entry` 已追加到队列尾部；`len(self)` 增加 1
 - Inv: 追加顺序保持（FIFO）
-- 副作用: 修改内部存储
+- 副作用: 修改内部 `deque`
 - 错误: 无
 
 #### `DeadLetterQueue.get_all(self) -> list[DeadLetterEntry]`
@@ -604,7 +655,9 @@ class DeadLetterEntry:
 
 | 异常类 | 继承自 | 触发场景 |
 |--------|--------|----------|
-| `CyclicDependencyError` | `ValueError` | `after` 依赖形成循环（注册时 / resolve_order 时） |
-| `KeyConflictError` | `ValueError` | 合并监听器返回字典时键冲突 |
-| `QueueFullError` | `RuntimeError` | 同步事件队列超出 `max_size` |
-| `ShutdownTimeoutError` | `TimeoutError` | 优雅停机超时 |
+| `EventdError` | `Exception` | eventd 所有自定义异常的基类 |
+| `EventValidationError` | `EventdError`, `ValueError` | 用户自定义字段验证失败（包装 pydantic `ValidationError`） |
+| `CyclicDependencyError` | `EventdError`, `ValueError` | `after` 依赖形成循环（注册时 / resolve_order 时） |
+| `KeyConflictError` | `EventdError`, `ValueError` | 合并监听器返回字典时键冲突 |
+| `QueueFullError` | `EventdError`, `RuntimeError` | 同步事件队列超出 `max_size` |
+| `ShutdownTimeoutError` | `EventdError`, `TimeoutError` | 优雅停机超时 |

@@ -23,7 +23,7 @@
   - `event_id`和`timestamp`在事件提交时由框架生成（见F-004、F-005）
 - **输出/结果**: 一个可用的事件类，可通过构造函数创建事件实例
 - **异常处理**:
-  - 数据验证失败时抛出`ValidationError`（pydantic原生）
+  - 数据验证失败时抛出`EventValidationError`（捕获 pydantic `ValidationError` 后包装为 eventd 自有异常）
 
 ### F-002: 监听器注册（装饰器方式）
 
@@ -33,11 +33,11 @@
 - **输入**:
   - 单个事件类，或事件类列表
   - 回调函数（同步事件管理器只能注册同步监听器，异步事件管理器只能注册异步监听器）
-  - 可选参数：`priority`（整数，**越大优先级越高**）、`after`（监听器名称列表，这些监听器必须在当前监听器之前执行）
+  - 可选参数：`priority`（整数，**越大优先级越高**）、`after`（回调函数列表，这些监听器必须在当前监听器之前执行）
 - **处理逻辑**: 将回调函数注册到该dispatcher实例的指定事件类型的监听器列表
 - **输出/结果**: 被装饰的函数（保持原函数可用）
 - **异常处理**:
-  - 如果`after`中指定的监听器**未被注册到任何事件**，注册时立即抛出`ValueError`
+  - 如果`after`中指定的回调函数**未被注册到任何事件**，注册时立即抛出`ValueError`
   - 如果`after`形成循环依赖，注册时立即抛出`CyclicDependencyError`
   - 如果回调函数类型与事件管理器类型不匹配（同步vs异步），注册时立即抛出`TypeError`
 - **设计说明**: `on`是dispatcher实例方法，不是独立的全局装饰器。框架提供一个默认的`Dispatcher`实例（模块级别），用户可直接使用其方法（`from eventd import dispatcher`），也可自行创建新的dispatcher实例
@@ -59,14 +59,23 @@
 
 **优先级**: P0
 
-- **触发条件**: 用户调用`dispatcher.unregister(event_class, callback)`或`dispatcher.unregister([event_class1, event_class2], callback)`
+- **触发条件**: 用户调用`dispatcher.unregister()`
 - **输入**:
-  - 单个事件类，或事件类列表
-  - 要移除的回调函数
-- **处理逻辑**: 从指定事件类型的监听器列表中移除该回调函数
+  - 可选：单个事件类，或事件类列表（`event_types`）
+  - 可选：要移除的回调函数（`callback`）
+- **处理逻辑**: 支持四种调用模式：
+
+  | `event_types` | `callback` | 行为 |
+  |---------------|------------|------|
+  | 有 | 有 | 从指定事件类型中移除指定回调 |
+  | 有 | `None` | 从指定事件类型中移除**所有**监听器 |
+  | `None` | 有 | 从**所有**事件类型中移除指定回调 |
+  | `None` | `None` | 抛出 `ValueError`（无意义调用） |
+
 - **输出/结果**: 无
 - **异常处理**:
-  - 如果该回调函数未注册到指定事件类型，抛出`ValueError`
+  - 如果 `event_types` 和 `callback` 均为 `None`，抛出`ValueError`
+  - 如果指定的回调函数未注册到指定事件类型，抛出`ValueError`
   - 如果移除该监听器导致其他监听器的`after`依赖失效，抛出`ValueError`（被依赖的监听器不可移除）
 - **设计说明**: `@on`装饰器返回的句柄（原函数）不用于取消订阅，取消订阅必须通过`unregister`方法显式调用
 
@@ -93,8 +102,8 @@
   - 如果合并返回值时出现键冲突，抛出`KeyConflictError`
 - **设计说明**:
   - `event_id`在emit函数接收事件实例时被创建与分配。由于同步和异步都是单线程模型，协程的并发发生在emit内部管理，因此`event_id`的自增是协程安全的
-  - 用户自定义`event_id`生成函数的签名为`() -> Any`，每次调用返回一个新值
-  - 用户自定义`timestamp`生成函数的签名为`() -> Any`，每次调用返回一个新值
+  - 用户自定义`event_id`生成函数的签名为`() -> int`，每次调用返回一个新值
+  - 用户自定义`timestamp`生成函数的签名为`() -> float`，每次调用返回一个新值
   - 如果同一个监听器通过MRO匹配了多次（如分别注册在父类和子类上），不进行去重，因为监听注册并不是继承的，多次触发是用户意图
 
 ### F-005: 事件提交（异步模式）
@@ -190,10 +199,10 @@
 
 - **触发条件**: 用户创建事件管理器时配置
 - **输入**:
-  - `error_strategy`: `"propagate"`（默认）| `"capture"` | `"retry"`
+  - `error_strategy`: `ErrorStrategy.PROPAGATE`（默认）| `ErrorStrategy.CAPTURE` | `ErrorStrategy.RETRY`（`ErrorStrategy` 为 `StrEnum`）
   - `retry_config`: 当strategy为`"retry"`时必需
     - `max_retries`: 最大重试次数
-    - `should_retry`: 可选函数，接收`(exception, context) -> bool`，决定是否重试
+    - `should_retry`: 可选函数，接收`(exception, context: ExecutionContext) -> bool`，决定是否重试
   - `dead_letter_enabled`: 是否启用死信队列（默认False）
 - **处理逻辑**: 配置保存到事件管理器实例
 - **输出/结果**: 事件管理器使用指定策略处理监听器异常
@@ -257,7 +266,7 @@
 **事件定义（F-001）**：
 
 - 正常创建事件实例
-- pydantic数据验证失败
+- pydantic数据验证失败抛出EventValidationError
 
 **监听器注册（F-002/F-003）**：
 
@@ -270,7 +279,10 @@
 
 **取消订阅（F-003A）**：
 
-- 正常取消订阅
+- 正常取消订阅（指定事件+回调）
+- 取消指定事件的所有监听器
+- 取消所有事件中的指定回调
+- event_types和callback均为None时抛出ValueError
 - 取消未注册的回调抛出ValueError
 - 取消被依赖的监听器抛出ValueError
 
@@ -315,7 +327,7 @@
 - propagate策略：异常向上传播
 - capture策略：异常被捕获，继续执行
 - retry策略：立即重试指定次数
-- should_retry条件函数
+- should_retry条件函数（接收ExecutionContext）
 - 重试耗尽后进入死信队列
 
 #### 4.5.3 测试组织
@@ -389,6 +401,7 @@ stateDiagram-v2
 | MRO继承链触发 | emit `EventB(EventA)`时，按MRO顺序触发：先`EventB`的监听器，再`EventA`的监听器 |
 | 同一监听器多次MRO匹配 | 不去重，每次匹配都触发（多次注册是用户意图） |
 | 取消被依赖的监听器 | 抛出`ValueError`（其他监听器的`after`依赖失效） |
+| 取消订阅时 event_types 和 callback 均为 None | 抛出`ValueError`（无意义调用） |
 | shutdown后emit | 抛出异常（事件管理器已关闭，不再接受新事件） |
 
 ## 8. 配置API参考
@@ -412,15 +425,15 @@ dispatcher.emit(event)
 ```python
 # 同步模式（自行创建）
 sync_dispatcher = Dispatcher(
-    error_strategy="retry",  # "propagate" | "capture" | "retry"
+    error_strategy=ErrorStrategy.RETRY,  # ErrorStrategy.PROPAGATE | .CAPTURE | .RETRY
     retry_config=RetryConfig(
         max_retries=3,
         should_retry=lambda exc, ctx: isinstance(exc, TimeoutError)
     ),
     dead_letter_enabled=True,
     queue_max_size=1000,  # None表示无限制
-    event_id_generator=lambda: uuid4().hex,  # 可选，签名 () -> Any
-    timestamp_generator=lambda: time.time(),  # 可选，签名 () -> Any
+    event_id_generator=lambda: uuid4().int,  # 可选，签名 () -> int
+    timestamp_generator=lambda: time.time(),  # 可选，签名 () -> float
 )
 
 # 异步模式
@@ -432,7 +445,7 @@ async_dispatcher = AsyncDispatcher(
 ### 监听器注册与取消
 
 ```python
-@sync_dispatcher.on(UserEvent, priority=10, after=["validate_user"])
+@sync_dispatcher.on(UserEvent, priority=10, after=[validate_user])
 def handle_user(event: UserEvent) -> dict:
     return {"user_id": event.user_id}
 

@@ -294,7 +294,9 @@
 | 代码格式化 | 使用 `ruff format` |
 | 静态检查 | 使用 `ruff check` |
 | import 排序 | 使用 `isort`（通过 ruff 集成，不允许独立运行） |
-| type hints | 使用 PEP 585 内置泛型写法（`list[str]`、`dict[str, int]`、`tuple[int, ...]`），**禁止**使用 `typing.List`、`typing.Dict` 等旧写法 |
+| type hints | 使用 PEP 585 内置泛型写法（`list[str]`、`dict[str, int]`、`tuple[int, ...]`），**禁止**使用 `typing.List`、`typing.Dict` 等旧写法。可选类型使用 `X \| None`，**禁止**使用 `typing.Optional`（减少 `typing` 模块导入，保持风格一致） |
+| 枚举值 | 使用 `enum.Enum`（Python 3.11+）或者对于特定数据类型使用更新的实现（如`enum.StrEnum`），**禁止**使用字面值字符串枚举（如 `"propagate" \| "capture"`） |
+| 标准库优先 | 优先使用标准库提供的数据结构和工具，**禁止**重新实现标准库已提供的功能。如有特殊需求，应继承标准库实现并扩展 |
 | docstring | Google Style |
 | 包管理 | 使用 `uv` |
 | 测试框架 | `pytest` + `pytest-asyncio` |
@@ -337,6 +339,18 @@
 
 - Agent 之间的协作边界由 `PLAN.md` 界定。每个阶段可标注负责的 Agent 身份。
 - 不同 Agent 之间通过文档（`PRD.md`、`INFRASTRUCTURE.md`、`PLAN.md`）同步状态，不依赖对话上下文。
+
+### 9.7 技术债记录
+
+- 对于中途作出的为了快速开发而不完全合理的技术决定，Agent **必须**将问题记录在 `TODO.md` 中。
+- 每条记录包含：编号、问题描述、产生原因、建议的后续改进方向。
+- Agent 在实现过程中如果选择了"先用简单方案，后续优化"的路径，**必须**在 `TODO.md` 中留下条目。
+
+### 9.8 技术决策讨论记录
+
+- 用户与 Agent 之间就技术方案进行的讨论，Agent **必须**将讨论过程和最终结论记录到 `TECH_DISCUZ.md` 中。
+- 每条记录包含：编号、讨论主题、备选方案、最终决策及理由。
+- 记录时机：在用户确认技术决策后，立即追加到 `TECH_DISCUZ.md`。
 
 ---
 
