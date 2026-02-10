@@ -61,15 +61,17 @@
 EventdError(Exception)
 ├── EventValidationError(EventdError, ValueError)
 ├── CyclicDependencyError(EventdError, ValueError)
-├── KeyConflictError(EventdError, ValueError)
-└── ShutdownTimeoutError(EventdError, TimeoutError)
+└── KeyConflictError(EventdError, ValueError)
 ```
 
-> **注**：`QueueFullError(EventdError, RuntimeError)` 已在 TD-013 讨论中移除 — 同步路径不再使用 EventQueue，异步路径使用 `asyncio.Queue` 的原生异常。
+> **注**：`ShutdownTimeoutError(EventdError, TimeoutError)` 已在 MVP 范围缩减（TD-020）中移除 — shutdown 不再接受 timeout 参数，关闭时拒绝新事件使用 `RuntimeError` 而非自定义异常。
+> **注**：`QueueFullError(EventdError, RuntimeError)` 已在 TD-013 讨论中移除 — 同步路径不再使用 EventQueue，异步路径也已移除队列（TD-021）。
 
 ---
 
 ## TD-004: 枚举类型选择 — StrEnum vs Enum
+
+> **注**：原讨论以 `error_strategy` 枚举为例。该枚举已随 C-005（ErrorHandler）移除（TD-020），但 `StrEnum` 的选型决定仍适用于项目中未来可能出现的枚举类型。
 
 **背景**：`error_strategy` 等配置参数需要枚举值。Python 3.11+ 提供 `StrEnum`，3.12+ 更成熟。
 
@@ -136,6 +138,8 @@ EventdError(Exception)
 
 **背景**：同步事件队列需要 FIFO + 有界 + 满时抛异常的行为。
 
+> **注**：本讨论已成为历史记录。MVP 范围缩减后（TD-020），同步和异步路径均采用直接递归（TD-021），所有队列组件（`EventQueue`、`AsyncEventQueue`）已从 MVP 中移除。以下内容保留以记录决策演变过程。
+
 **标准库选项分析**：
 
 | 选项 | 特点 | 适用性 |
@@ -175,6 +179,8 @@ EventdError(Exception)
 
 ## TD-010: ExecutionContext 构建时机
 
+> **注**：本讨论已成为历史记录。MVP 范围缩减后（TD-020），ExecutionContext 随 C-005（ErrorHandler）一同移除，不再属于 MVP 范围。以下内容保留以记录决策演变过程。
+
 **背景**：`ErrorHandler.handle()` 需要事件执行的上下文信息。原方案在每次调用监听器前构建 `ExecutionContext`。
 
 **可选方案**：
@@ -191,6 +197,8 @@ EventdError(Exception)
 ---
 
 ## TD-011: context 字段类型 — dataclass vs dict
+
+> **注**：本讨论已成为历史记录。MVP 范围缩减后（TD-020），ExecutionContext 随 C-005（ErrorHandler）一同移除。以下内容保留以记录决策演变过程。
 
 **背景**：多处使用 `context: dict` 但未定义结构和收集方式。
 
@@ -259,13 +267,13 @@ class ExecutionContext:
 1. 直接递归保持了事件的即时语义，行为更可预测。
 2. Python `RecursionError` 是可靠的安全网，无需框架层面重复保护。
 3. 在函数 docstring 中警告用户避免构建循环事件链。
-4. 同步路径移除 `EventQueue` 后，`EventQueue` 简化为仅 `AsyncEventQueue`（异步路径仍需队列处理协程切换场景）。
+4. 同步和异步路径统一采用直接递归 — 异步路径同样移除了 `_is_emitting` 标志和 `AsyncEventQueue`，与同步版行为完全一致（参见 TD-021）。
 5. 未来可通过 `max_emit_depth` 计数器提供更精细的控制（TD-004）。
 
 **附带变更**：
 - 移除 `QueueFullError` 异常（无同步队列则无需此异常）。
 - §8.2.9（递归事件处理）章节整体移除，相关逻辑合并到 §8.2.2 同步 emit 流程中。
-- C-004 组件清单从「EventQueue / AsyncEventQueue」简化为仅「AsyncEventQueue」。
+- C-004 组件（AsyncEventQueue）已在后续 MVP 范围缩减（TD-020）中完全移除。
 
 ---
 
@@ -281,9 +289,10 @@ class ExecutionContext:
 |------|----------|
 | 同步监听器回调 | `Callable[[Event], dict[str, Any] \| None]` |
 | 异步监听器回调 | `Callable[[Event], Awaitable[dict[str, Any] \| None]]` |
-| 重试判断函数 | `Callable[[Exception, ExecutionContext], bool]` |
 | event_id 生成器 | `Callable[[], int]` |
 | timestamp 生成器 | `Callable[[], float]` |
+
+> **注**：原清单中的「重试判断函数 `Callable[[Exception, ExecutionContext], bool]`」已随 C-005（ErrorHandler/RetryConfig）移除（TD-020），不再属于 MVP 范围。
 
 **理由**：完整的 Callable 注解让 IDE 和类型检查器能够验证回调签名，避免运行时参数不匹配错误。符合 HOW_TO.md §8 的类型注解规范要求。
 
@@ -360,7 +369,7 @@ class ExecutionContext:
 - 关于「MetaEvent 监听器自身出错怎么办」的问题，用户明确：「如果 ErrorHandler 自身出错，说明是框架自身编写问题，这在交付时不应该出现。这应该被视为 bug 而不是设计问题。」
 - 因此 MVP 阶段不需要处理 MetaEvent 监听器的递归错误场景。
 
-**决定**：MVP 预留 MetaEvent 类定义，实际功能仍用直接调用实现。完整的元事件化重构记录到 `TODO.md` TD-005。
+**决定**：MVP 仅预留 MetaEvent 类定义，不实现 ErrorHandler 和 DeadLetterQueue（既不用直接调用也不用 MetaEvent 监听器）。完整的 MetaEvent 监听器扩展实现记录到 `TODO.md` TD-005。
 
 **预留内容**：
 
@@ -382,9 +391,9 @@ class EventDeadLetteredEvent(MetaEvent):
 ```
 
 **理由**：
-1. 预留类定义成本极低（几行代码），但为未来重构奠定基础。
+1. 预留类定义成本极低（几行代码），但为未来扩展奠定基础。
 2. 元事件机制比直接实现 ErrorHandler 配置解析 + DeadLetterQueue 操作接口更优雅、更统一。
-3. MVP 阶段用直接调用保持简单，避免过度设计。
+3. MVP 阶段监听器异常直接 propagate，保持核心分发逻辑简洁（参见 TD-020）。
 
 ---
 
@@ -415,3 +424,66 @@ class EventDeadLetteredEvent(MetaEvent):
 2. `WeakKeyDictionary` 以 `type[Event]` 为键 — 如果用户动态创建的事件类被垃圾回收，对应缓存条目自动清理，防止内存泄漏。
 3. 相比 `lru_cache` + `cache_clear()`，revision 方案不需要在每个变更点手动调用清理，只需自增计数器即可。
 4. 缓存粒度为单个 `event_type`，不同事件类型的缓存互不影响。
+
+---
+
+## TD-020: MVP 范围缩减 — 移除 C-004、C-005、C-006
+
+**背景**：原 INFRASTRUCTURE.md 定义了 6 个核心组件：C-001（Event/MetaEvent）、C-002（Dispatcher/AsyncDispatcher）、C-003（RegistryTable）、C-004（AsyncEventQueue）、C-005（ErrorHandler/ErrorStrategy/RetryConfig）、C-006（DeadLetterQueue）。用户审阅后明确提出「MVP 阶段不实现 C-005 和 C-006」，同时 C-004 因异步路径统一为直接递归（TD-021）而不再需要。
+
+**讨论**：
+- ErrorHandler 和 DeadLetterQueue 原为独立组件，但用户已决定它们应基于 MetaEvent 扩展实现（TD-018），而非作为 MVP 的核心部分。
+- 「预留元事件比实现一个错误处理机制（带配置解析）和一个死信队列（带相关操作）更简单」— 用户原话。
+- MVP 阶段监听器异常直接 propagate，框架不拦截，行为简单可预测。
+- AsyncEventQueue 随着异步 emit 统一为直接递归（TD-021）而失去存在意义。
+
+**决定**：MVP 仅保留 3 个核心组件 — C-001（Event/MetaEvent）、C-002（Dispatcher/AsyncDispatcher）、C-003（RegistryTable）。
+
+**具体变更**：
+1. C-004（AsyncEventQueue）：完全移除。异步路径使用直接递归。
+2. C-005（ErrorHandler/ErrorStrategy/ExecutionContext/RetryConfig）：完全移除。异常直接 propagate。
+3. C-006（DeadLetterQueue/DeadLetterEntry）：完全移除。无死信存储。
+4. `ShutdownTimeoutError` 异常移除 — `shutdown()` 不再接受 `timeout` 参数。
+5. `BaseDispatcher.__init__` 简化 — 移除 `error_strategy`、`retry_config`、`dead_letter_enabled`、`queue_max_size` 参数。
+6. `_execute_listener` 简化 — 无 try/except、无 ErrorHandler 调用、无 ExecutionContext 构建。
+7. 文件结构移除 `queue.py`、`error_handler.py`、`dead_letter.py`。
+
+**理由**：
+1. 降低 MVP 复杂度，聚焦核心事件分发功能的正确性。
+2. ErrorHandler/DeadLetterQueue 作为 MetaEvent 扩展实现更优雅（TD-005）。
+3. 减少初版代码量和测试范围，加速交付。
+
+**关联**：`TODO.md` TD-005（未来实现 MetaEvent 监听器扩展）
+
+---
+
+## TD-021: 异步 emit 统一为直接递归（与同步版行为一致）
+
+**背景**：原设计中 `AsyncDispatcher.emit()` 使用 `_is_emitting` 标志 + `AsyncEventQueue` 处理递归场景 — 当异步监听器在执行过程中触发新的 `emit()` 时，新事件被推入异步队列延迟处理。而同步 `Dispatcher.emit()` 已在 TD-013 中改为直接递归。
+
+**讨论**：
+- 用户明确提出「异步事件也应当和同步事件一样，如果一个回调触发另一个事件那么也应当递归执行完毕再执行下一个回调」。
+- 统一同步/异步行为消除了用户理解成本 — 不需要分别理解两种不同的递归语义。
+- 移除 `AsyncEventQueue` 和 `_is_emitting` 后，异步路径的实现大幅简化。
+
+**可选方案**：
+
+| 方案 | 描述 |
+|------|------|
+| A | 保留 `_is_emitting` + `AsyncEventQueue` 队列化处理 |
+| B | 统一为直接递归，与同步版行为一致 |
+
+**决定**：方案 B。异步 emit 使用 `await self._dispatch_single(event)` 直接递归调用。
+
+**具体变更**：
+1. 移除 `AsyncDispatcher._is_emitting` 标志位。
+2. 移除 `AsyncEventQueue` 组件依赖。
+3. `AsyncDispatcher.emit()` 改为直接调用 `await self._dispatch_single(event)`，镜像同步版逻辑。
+4. Python `RecursionError` 作为安全网（与同步版一致）。
+5. 并发 `emit()` 行为（如 `asyncio.gather(d.emit(e1), d.emit(e2))`）待后续明确（`TODO.md` TD-002）。
+
+**理由**：
+1. 同步/异步行为统一，降低用户学习和理解成本。
+2. 直接递归保持事件的即时语义，行为更可预测。
+3. 架构简化 — 移除 `AsyncEventQueue` 组件和相关内部逻辑。
+4. 与 TD-013 的同步路径决策保持一致。

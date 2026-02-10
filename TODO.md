@@ -14,11 +14,11 @@
 
 ### TD-002: 异步并发 emit 的行为保证
 
-- **当前状态**：`AsyncDispatcher.emit()` 使用 `_is_emitting` 标志进行递归保护，但未明确定义多个 `emit()` 协程并发调用时的行为（如 `asyncio.gather(d.emit(e1), d.emit(e2))`）。
-- **期望状态**：明确并发 `emit` 的语义——是串行化（`asyncio.Lock`）还是支持独立队列并发。
+- **当前状态**：`AsyncDispatcher.emit()` 使用直接递归调用（与同步版行为一致），无 `_is_emitting` 标志、无 `AsyncEventQueue`。但未明确定义多个 `emit()` 协程并发调用时的行为（如 `asyncio.gather(d.emit(e1), d.emit(e2))`）。
+- **期望状态**：明确并发 `emit` 的语义——是串行化（`asyncio.Lock`）还是允许交错执行。
 - **决策原因**：初版建议使用 `asyncio.Lock` 串行化，保证行为简单可预测。如性能不可接受再引入并发方案。
 - **影响范围**：C-002（AsyncDispatcher）
-- **参考讨论**：`INFRASTRUCTURE.md` §8.2.9
+- **参考讨论**：`INFRASTRUCTURE.md` 悬置项 S-001
 
 ### TD-003: 多线程支持（线程安全）
 
@@ -36,10 +36,10 @@
 - **影响范围**：C-002（Dispatcher）
 - **参考讨论**：`TECH_DISCUZ.md` TD-013（移除同步递归保护讨论）
 
-### TD-005: 元事件化重构（ErrorHandler / DeadLetterQueue → MetaEvent 监听器）
+### TD-005: 实现 ErrorHandler / DeadLetterQueue 作为 MetaEvent 监听器扩展
 
-- **当前状态**：C-005（ErrorHandler）和 C-006（DeadLetterQueue）通过 Dispatcher 内部直接调用 `error_handler.handle()` / `dead_letter_queue.enqueue()` 实现。已预留 `MetaEvent` 基类和 `ListenerErrorEvent`、`EventDeadLetteredEvent` 两个子类定义。
-- **期望状态**：将 ErrorHandler 和 DeadLetterQueue 的功能完全迁移为 MetaEvent 监听器。Dispatcher 在错误/死信场景中 emit 对应的 MetaEvent，用户通过注册 MetaEvent 监听器来自定义处理逻辑，框架提供默认的内置监听器实现。
-- **决策原因**：MetaEvent 监听器方案比直接实现 ErrorHandler 配置解析 + DeadLetterQueue 操作接口更优雅，但需要更完善的 MetaEvent 分发机制设计（如避免 MetaEvent 监听器自身出错时的无限递归）。初版先用直接调用保持简单。
-- **影响范围**：C-001（Event / MetaEvent）、C-002（Dispatcher / AsyncDispatcher）、C-005（ErrorHandler）、C-006（DeadLetterQueue）
-- **参考讨论**：`TECH_DISCUZ.md` TD-018（MetaEvent 元事件架构预留讨论）
+- **当前状态**：MVP 阶段不实现错误处理和死信队列。监听器抛出的异常直接 propagate，框架不拦截。仅预留 `MetaEvent` 基类及 `ListenerErrorEvent`、`EventDeadLetteredEvent` 两个子类定义。
+- **期望状态**：基于 MetaEvent 监听器机制从零实现 ErrorHandler 和 DeadLetterQueue — Dispatcher 在错误/死信场景中 emit 对应的 MetaEvent，用户通过注册 MetaEvent 监听器来自定义处理逻辑，框架提供默认的内置监听器实现。
+- **决策原因**：MVP 阶段优先保证核心分发逻辑的正确性和简洁性。MetaEvent 监听器方案比独立组件（ErrorHandler 配置解析 + DeadLetterQueue 操作接口）更优雅统一，但需要更完善的 MetaEvent 分发机制设计。
+- **影响范围**：C-001（Event / MetaEvent）、C-002（Dispatcher / AsyncDispatcher）
+- **参考讨论**：`TECH_DISCUZ.md` TD-018（MetaEvent 架构预留）、TD-020（MVP 范围缩减）
