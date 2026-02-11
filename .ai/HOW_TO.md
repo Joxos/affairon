@@ -294,12 +294,14 @@
 | 代码格式化 | 使用 `ruff format` |
 | 静态检查 | 使用 `ruff check` |
 | import 排序 | 使用 `isort`（通过 ruff 集成，不允许独立运行） |
-| type hints | 使用 PEP 585 内置泛型写法（`list[str]`、`dict[str, int]`、`tuple[int, ...]`），**禁止**使用 `typing.List`、`typing.Dict` 等旧写法。可选类型使用 `X \| None`，**禁止**使用 `typing.Optional`（减少 `typing` 模块导入，保持风格一致） |
-| 枚举值 | 使用 `enum.Enum`（Python 3.11+）或者对于特定数据类型使用更新的实现（如`enum.StrEnum`），**禁止**使用字面值字符串枚举（如 `"propagate" \| "capture"`） |
+| type hints | 使用 PEP 585 内置泛型写法（`list[str]`、`dict[str, int]`、`tuple[int, ...]`），**禁止**使用 `typing.List`、`typing.Dict` 等旧写法。可选类型使用 `X | None`，**禁止**使用 `typing.Optional`（减少 `typing` 模块导入，保持风格一致） |
+| 枚举值 | 使用 `enum.Enum`（Python 3.11+）或者对于特定数据类型使用更新的实现（如`enum.StrEnum`），**禁止**使用字面值字符串枚举（如 `"propagate" | "capture"`） |
 | 标准库优先 | 优先使用标准库提供的数据结构和工具，**禁止**重新实现标准库已提供的功能。如有特殊需求，应继承标准库实现并扩展 |
 | docstring | Google Style |
 | 包管理 | 使用 `uv` |
 | 测试框架 | `pytest` + `pytest-asyncio` |
+| 代码注释语言 | 代码内注释仅使用英文 |
+| Git 使用限制 | AI 不得直接使用 git 命令（除了 git log 和 git status 等检查命令），除非获得用户许可 |
 
 ### 8.2 Python 项目
 

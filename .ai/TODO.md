@@ -43,3 +43,11 @@
 - **决策原因**：MVP 阶段优先保证核心分发逻辑的正确性和简洁性。MetaEvent 监听器方案比独立组件（ErrorHandler 配置解析 + DeadLetterQueue 操作接口）更优雅统一，但需要更完善的 MetaEvent 分发机制设计。
 - **影响范围**：C-001（Event / MetaEvent）、C-002（Dispatcher / AsyncDispatcher）
 - **参考讨论**：`TECH_DISCUZ.md` TD-018（MetaEvent 架构预留）、TD-020（MVP 范围缩减）
+
+### TD-006: 支持 weakref 作为 callback 引用
+
+- **当前状态**：RegistryTable 使用强引用存储所有 callback，可能导致内存泄漏（如 lambda 或闭包捕获大对象）。已移除 weakref 支持以简化 MVP 实现。
+- **期望状态**：提供选项允许使用 weak reference 存储 callback，在 callback 对象被回收时自动清理注册表。
+- **决策原因**：初版优先保证功能正确性和实现简洁性。weakref 需要处理边缘情况（如 bound method 的 weakref 代理）和清理逻辑，增加复杂度。
+- **影响范围**：C-003（RegistryTable）
+- **参考讨论**：refactoring session 2026-02-11
