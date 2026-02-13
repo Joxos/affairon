@@ -51,3 +51,11 @@
 - **决策原因**：初版优先保证功能正确性和实现简洁性。weakref 需要处理边缘情况（如 bound method 的 weakref 代理）和清理逻辑，增加复杂度。
 - **影响范围**：C-003（RegistryTable）
 - **参考讨论**：refactoring session 2026-02-11
+
+### TD-007: 支持子 Event 自动触发父 Event 的继承机制
+
+- **当前状态**：当子 Event 类实例被 emit 时，仅执行该 Event 类型及其 MRO 链上注册的监听器，不会自动实例化并 emit 父 Event 类实例。
+- **期望状态**：允许用户通过 Event 中的 `inherit` 字段（或配置项）决定是否在子 Event 类实例被提交后，按 `__mro__` 顺序自动实例化父 Event 类实例并提交调用。例如：`ChildEvent(data="x")` 被 emit 时，自动触发 `ParentEvent(data="x")` 的 emit。
+- **决策原因**：当前设计基于"监听器继承"（子事件触发父事件的监听器），而非"事件继承"（子事件自动触发父事件）。后者需要解决字段兼容性、构造参数传递、循环触发等问题，增加复杂度。
+- **影响范围**：C-001（Event）、C-002（Dispatcher / AsyncDispatcher）
+- **参考讨论**：user request 2026-02-11

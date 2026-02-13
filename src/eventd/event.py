@@ -6,8 +6,7 @@ event-driven architecture.
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from eventd.exceptions import EventValidationError
 
@@ -16,62 +15,26 @@ class Event(BaseModel):
     """Base class for all events.
 
     Users should inherit from this class to define custom events with
-    additional fields. The event_id and timestamp fields are reserved
-    and will be injected by the Dispatcher during emit().
+    additional fields. Instances are immutable (frozen).
 
     Example:
         >>> class UserEvent(Event):
         ...     user_id: int
         ...     action: str
         >>> event = UserEvent(user_id=123, action="login")
-        >>> # event_id and timestamp are None until emit()
 
-    Attributes:
-        event_id: Unique integer identifier (injected by Dispatcher).
-        timestamp: Float timestamp in seconds (injected by Dispatcher).
+    Raises:
+        EventValidationError: If fields fail pydantic validation.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    event_id: int | None = Field(default=None, init=False)
-    timestamp: float | None = Field(default=None, init=False)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_reserved_fields(cls, data: Any) -> Any:
-        """Reject user-provided reserved fields.
-
-        Args:
-            data: User-provided data.
-
-        Returns:
-            Validated data.
-
-        Raises:
-            EventValidationError: If reserved fields are provided.
-        """
-        if isinstance(data, dict):
-            reserved = {"event_id", "timestamp"}
-            provided = reserved & set(data.keys())
-            if provided:
-                raise EventValidationError(
-                    f"Reserved fields cannot be provided by user: {provided}"
-                )
-        return data
-
     def __init__(self, **data: Any) -> None:
-        """Initialize event with validation.
-
-        Args:
-            **data: Event field values.
-
-        Raises:
-            EventValidationError: If validation fails.
-        """
+        """Wrap pydantic ValidationError into EventValidationError."""
         try:
             super().__init__(**data)
-        except PydanticValidationError as e:
-            raise EventValidationError(str(e)) from e
+        except ValidationError as exc:
+            raise EventValidationError(str(exc)) from exc
 
 
 class MetaEvent(Event):
@@ -87,7 +50,7 @@ class MetaEvent(Event):
     """
 
 
-class ListenerErrorEvent(MetaEvent):
+class CallbackErrorEvent(MetaEvent):
     """Meta-event emitted when a listener raises an exception.
 
     Attributes:

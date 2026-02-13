@@ -5,25 +5,11 @@ Centralizing these definitions ensures consistency and makes future
 type changes easier to manage.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from typing import Any
 
-# Forward reference to Event class (defined in event.py)
-# Using string literal to avoid circular import
-Event = Any  # Will be properly typed as eventd.Event at runtime
+from .event import Event  # Importing Event for type annotations
 
-# Synchronous listener callback signature
-# Takes an Event, returns a dict or None
-ListenerCallback = Callable[[Event], dict[str, Any] | None]
-
-# Asynchronous listener callback signature
-# Takes an Event, returns an awaitable that resolves to dict or None
-AsyncListenerCallback = Callable[[Event], Awaitable[dict[str, Any] | None]]
-
-# Event ID generator function signature
-# Returns a unique integer for each event
-EventIdGenerator = Callable[[], int]
-
-# Timestamp generator function signature
-# Returns a float timestamp (typically from time.time())
-TimestampGenerator = Callable[[], float]
+StandardResultT = dict[str, Any] | None
+CallbackT = Callable[[Event], StandardResultT]
+AsyncCallbackT = Callable[[Event], Coroutine[Any, Any, StandardResultT]]

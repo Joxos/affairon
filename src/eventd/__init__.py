@@ -7,7 +7,7 @@ and asynchronous dispatch modes.
 __version__ = "0.1.0"
 
 from eventd.dispatcher import AsyncDispatcher, Dispatcher
-from eventd.event import Event, EventDeadLetteredEvent, ListenerErrorEvent, MetaEvent
+from eventd.event import CallbackErrorEvent, Event, EventDeadLetteredEvent, MetaEvent
 from eventd.exceptions import (
     CyclicDependencyError,
     EventdError,
@@ -24,7 +24,7 @@ __all__ = [
     # Event classes
     "Event",
     "MetaEvent",
-    "ListenerErrorEvent",
+    "CallbackErrorEvent",
     "EventDeadLetteredEvent",
     # Dispatcher classes
     "Dispatcher",
