@@ -6,8 +6,9 @@ and asynchronous dispatch modes.
 
 __version__ = "0.1.0"
 
-from eventd.dispatcher import AsyncDispatcher, Dispatcher
-from eventd.event import CallbackErrorEvent, Event, EventDeadLetteredEvent, MetaEvent
+from eventd.async_dispatcher import AsyncDispatcher
+from eventd.dispatcher import Dispatcher
+from eventd.event import CallbackErrorEvent, Event, EventDeadLetteredEvent, MetaEvent, MutableEvent
 from eventd.exceptions import (
     CyclicDependencyError,
     EventdError,
@@ -26,6 +27,7 @@ __all__ = [
     "MetaEvent",
     "CallbackErrorEvent",
     "EventDeadLetteredEvent",
+    "MutableEvent",
     # Dispatcher classes
     "Dispatcher",
     "AsyncDispatcher",

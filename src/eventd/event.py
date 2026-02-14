@@ -10,8 +10,18 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from eventd.exceptions import EventValidationError
 
+class MutableEvent(BaseModel):
+    """Mutable version of Event. Also serves as base class for Event to wrap pydantic validation.
+    """
 
-class Event(BaseModel):
+    def __init__(self, **data: Any) -> None:
+        """Wrap pydantic ValidationError into EventValidationError."""
+        try:
+            super().__init__(**data)
+        except ValidationError as exc:
+            raise EventValidationError(str(exc)) from exc
+
+class Event(MutableEvent):
     """Base class for all events.
 
     Users should inherit from this class to define custom events with
@@ -29,12 +39,6 @@ class Event(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    def __init__(self, **data: Any) -> None:
-        """Wrap pydantic ValidationError into EventValidationError."""
-        try:
-            super().__init__(**data)
-        except ValidationError as exc:
-            raise EventValidationError(str(exc)) from exc
 
 
 class MetaEvent(Event):

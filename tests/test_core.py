@@ -4,12 +4,12 @@ import pytest
 from pydantic import ValidationError
 
 from eventd import (
-    AsyncDispatcher,
     Dispatcher,
     Event,
     EventValidationError,
     KeyConflictError,
 )
+from eventd.async_dispatcher import AsyncDispatcher
 from eventd.exceptions import CyclicDependencyError
 
 # -- shared fixtures ----------------------------------------------------------
@@ -37,7 +37,7 @@ class TestEvent:
         with pytest.raises(EventValidationError):
             Ping()  # type: ignore[call-arg]
         with pytest.raises(EventValidationError):
-            Ping(1)  # type: ignore[call-arg]
+            Ping(msg=1)  # type: ignore[call-arg]
 
     def test_frozen(self):
         """1.4 — Event instances are immutable."""
