@@ -8,7 +8,7 @@ type changes easier to manage.
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from .event import Event  # Importing Event for type annotations
+from eventd.event import Event
 
 StandardResultT = dict[str, Any] | None
 CallbackT = Callable[[Event], StandardResultT]
