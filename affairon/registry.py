@@ -8,54 +8,54 @@ from collections import defaultdict
 
 import networkx as nx
 
-from eventd.event import Event
-from eventd.exceptions import CyclicDependencyError
+from affairon.affair import Affair
+from affairon.exceptions import CyclicDependencyError
 
 
 class BaseRegistry[CB]:
-    """Registry table for event listeners.
+    """Registry table for affair listeners.
 
     Manages listener registration, removal, and execution order resolution
     with MRO expansion, priority layering, and topological sorting using NetworkX.
 
-    Each event type has its own dependency graph for callback relationships.
-    _graphs maps event types to their dependency graphs.
+    Each affair type has its own dependency graph for callback relationships.
+    _graphs maps affair types to their dependency graphs.
     """
 
     def __init__(self, guardian: CB) -> None:
         """Initialize empty registry.
 
         Post:
-            _graphs is empty dict mapping event types to DiGraphs.
+            _graphs is empty dict mapping affair types to DiGraphs.
         """
         self._guardian = guardian
-        self._graphs: defaultdict[type[Event], nx.DiGraph[CB]] = defaultdict(nx.DiGraph)
+        self._graphs: defaultdict[type[Affair], nx.DiGraph[CB]] = defaultdict(nx.DiGraph)
 
     def add(
         self,
-        event_types: list[type[Event]],
+        affair_types: list[type[Affair]],
         callback: CB,
         after: list[CB] | None = None,
     ) -> None:
-        """Register a listener for specified event types.
+        """Register a listener for specified affair types.
 
         Args:
-            event_types: Event types to register for.
+            affair_types: Affair types to register for.
             callback: Listener callback function.
             after: List of callbacks that should run before this one.
 
         Post:
-            callback added to each event type's graph.
+            callback added to each affair type's graph.
             dependency edges added to each graph.
 
         Raises:
             ValueError: If entry.after references unregistered callbacks.
             CyclicDependencyError: If entry.after forms a cycle.
         """
-        # Add the entry for each event type
-        for event_type in event_types:
-            # defaultdict ensures graph exists for event_type
-            graph = self._graphs[event_type]
+        # Add the entry for each affair type
+        for affair_type in affair_types:
+            # defaultdict ensures graph exists for affair_type
+            graph = self._graphs[affair_type]
 
             # Ensure the guardian node exists
             # Note that add_node is idempotent
@@ -65,8 +65,8 @@ class BaseRegistry[CB]:
             for dep in after or []:
                 if dep not in graph:
                     raise ValueError(
-                        f"after={dep.__qualname__} not registered for event type "
-                        f"{event_type.__qualname__}"
+                        f"after={dep.__qualname__} not registered for affair type "
+                        f"{affair_type.__qualname__}"
                     )
 
             graph.add_node(callback)
@@ -83,45 +83,45 @@ class BaseRegistry[CB]:
 
                 raise CyclicDependencyError(
                     f"cyclic dependency detected: adding {callback.__qualname__} "
-                    f"would create a cycle in {event_type.__qualname__}"
+                    f"would create a cycle in {affair_type.__qualname__}"
                     f" - cycles: {cycles}"
                 )
 
     def remove(
         self,
-        event_types: list[type[Event]] | None,
+        affair_types: list[type[Affair]] | None,
         callback: CB | None,
     ) -> None:
         """Remove listeners from registry.
 
         Supports three modes:
-        - (event_types, callback): Remove callback from specified event types.
-        - (event_types, None): Remove all listeners from specified event types.
-        - (None, callback): Remove callback from all event types.
+        - (affair_types, callback): Remove callback from specified affair types.
+        - (affair_types, None): Remove all listeners from specified affair types.
+        - (None, callback): Remove callback from all affair types.
 
         Args:
-            event_types: Event types to remove from, or None for all.
+            affair_types: Affair types to remove from, or None for all.
             callback: Callback to remove, or None for all.
 
         Post:
-            Matching entries removed from event graphs.
+            Matching entries removed from affair graphs.
             Corresponding nodes/edges removed if no longer referenced.
 
         Raises:
             ValueError: If both args are None.
         """
         # Validate parameters
-        if event_types is None and callback is None:
-            raise ValueError("event_types and callback cannot both be None")
+        if affair_types is None and callback is None:
+            raise ValueError("affair_types and callback cannot both be None")
 
-        # If specific event requested
-        if event_types is not None:
-            for event_type in event_types:
-                # Get the graph for this event (skip if not exists)
-                if event_type not in self._graphs:
+        # If specific affair requested
+        if affair_types is not None:
+            for affair_type in affair_types:
+                # Get the graph for this affair (skip if not exists)
+                if affair_type not in self._graphs:
                     continue
 
-                graph = self._graphs[event_type]
+                graph = self._graphs[affair_type]
 
                 # If func requested, only remove the func node
                 if callback is not None:
@@ -129,43 +129,43 @@ class BaseRegistry[CB]:
                         graph.remove_node(callback)
                         # Clean up empty graph
                         if len(graph) == 0:
-                            del self._graphs[event_type]
+                            del self._graphs[affair_type]
                 else:
-                    # If no func requested, delete the event key
-                    del self._graphs[event_type]
+                    # If no func requested, delete the affair key
+                    del self._graphs[affair_type]
 
-        # If specific func requested and event not requested
+        # If specific func requested and affair not requested
         elif callback is not None:
-            # Search for all graphs of all events for func node and remove it
-            events_to_clean = []
-            for event_type, graph in self._graphs.items():
+            # Search for all graphs of all affairs for func node and remove it
+            affairs_to_clean = []
+            for affair_type, graph in self._graphs.items():
                 if callback in graph:
                     graph.remove_node(callback)
                     # Mark for cleanup if empty
                     if len(graph) == 0:
-                        events_to_clean.append(event_type)
+                        affairs_to_clean.append(affair_type)
 
             # Clean up empty graphs
-            for event_type in events_to_clean:
-                del self._graphs[event_type]
+            for affair_type in affairs_to_clean:
+                del self._graphs[affair_type]
 
-    def exec_order(self, event_type: type[Event]) -> list[list[CB]]:
-        """Return execution order for an event type using breadth-first enumeration.
+    def exec_order(self, affair_type: type[Affair]) -> list[list[CB]]:
+        """Return execution order for an affair type using breadth-first enumeration.
 
-        Performs a breadth-first traversal of the dependency graph for the event type
+        Performs a breadth-first traversal of the dependency graph for the affair type
         and returns a 2D list of callbacks in layers of execution order.
 
         Args:
-            event_type: Event type to resolve.
+            affair_type: Affair type to resolve.
 
         Returns:
             2D list of callbacks in layers of execution order (dependencies before dependents).
         """
-        # Get the graph for the event type
-        if event_type not in self._graphs:
+        # Get the graph for the affair type
+        if affair_type not in self._graphs:
             return []
 
-        graph = self._graphs[event_type]
+        graph = self._graphs[affair_type]
         return list(nx.bfs_layers(graph, sources=[self._guardian]))[
             1:
         ]  # Exclude guardian layer

@@ -1,7 +1,7 @@
-from eventd._types import AsyncCallbackT
-from eventd.base_dispatcher import BaseDispatcher
-from eventd.event import Event
-from eventd.utils import merge_dict
+from affairon._types import AsyncCallbackT
+from affairon.base_dispatcher import BaseDispatcher
+from affairon.affair import Affair
+from affairon.utils import merge_dict
 
 
 import asyncio
@@ -9,7 +9,7 @@ from typing import Any
 
 
 class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
-    """Asynchronous event dispatcher.
+    """Asynchronous affair dispatcher.
 
     Executes listeners asynchronously with same-priority parallelism.
     Uses asyncio.TaskGroup for structured concurrency.
@@ -17,14 +17,14 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
     """
 
     @staticmethod
-    async def _sample_guardian(event: Event) -> None:
+    async def _sample_guardian(affair: Affair) -> None:
         """Silent guardian callback to anchor execution order."""
 
     def __init__(self):
         super().__init__(self._sample_guardian)
 
-    async def emit(self, event: Event) -> dict[str, Any]:
-        """Asynchronously dispatch event.
+    async def emit(self, affair: Affair) -> dict[str, Any]:
+        """Asynchronously dispatch affair.
 
         Warning:
             Listeners can recursively call emit(). Framework does not detect cycles.
@@ -32,13 +32,13 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
             Python's RecursionError will be raised (default stack depth: 1000).
 
         Args:
-            event: Event to dispatch.
+            affair: Affair to dispatch.
 
         Returns:
             Merged dict of all listener results.
 
         Post:
-            event.event_id and event.timestamp set.
+            affair.affair_id and affair.timestamp set.
             All matching listeners executed in priority order.
             Same-priority listeners executed in parallel via TaskGroup.
 
@@ -48,14 +48,14 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
             RecursionError: If listeners form infinite recursion chain.
             ExceptionGroup: If multiple listeners fail simultaneously.
         """
-        layers = self._registry.exec_order(type(event))
+        layers = self._registry.exec_order(type(affair))
         merged_result: dict[str, Any] = {}
         for layer in layers:
             tasks = []
             try:
                 async with asyncio.TaskGroup() as tg:
                     for i, callback in enumerate(layer):
-                        tasks.append(tg.create_task(callback(event)))
+                        tasks.append(tg.create_task(callback(affair)))
             except* Exception:
                 # Let ExceptionGroup propagate
                 raise

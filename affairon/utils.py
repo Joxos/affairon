@@ -1,4 +1,4 @@
-from eventd.exceptions import KeyConflictError
+from affairon.exceptions import KeyConflictError
 
 
 from typing import Any

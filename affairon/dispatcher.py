@@ -1,35 +1,35 @@
-"""Dispatcher implementations for event handling.
+"""Dispatcher implementations for affair handling.
 
 This module provides BaseDispatcher (abstract base), Dispatcher (sync),
-and AsyncDispatcher (async) classes for event-driven programming.
+and AsyncDispatcher (async) classes for affair-driven programming.
 """
 
 from typing import Any
 
-from eventd._types import (
+from affairon._types import (
     CallbackT,
 )
-from eventd.base_dispatcher import BaseDispatcher
-from eventd.event import Event
-from eventd.utils import merge_dict
+from affairon.base_dispatcher import BaseDispatcher
+from affairon.affair import Affair
+from affairon.utils import merge_dict
 
 
 class Dispatcher(BaseDispatcher[CallbackT]):
-    """Synchronous event dispatcher.
+    """Synchronous affair dispatcher.
 
     Executes listeners synchronously in priority order.
     Recursive emit() calls execute directly (no queue).
     """
 
     @staticmethod
-    def _sample_guardian(event: Event) -> None:
+    def _sample_guardian(affair: Affair) -> None:
         """Silent guardian callback to anchor execution order."""
 
     def __init__(self):
         super().__init__(self._sample_guardian)
 
-    def emit(self, event: Event) -> dict[str, Any]:
-        """Synchronously dispatch event.
+    def emit(self, affair: Affair) -> dict[str, Any]:
+        """Synchronously dispatch affair.
 
         Warning:
             Listeners can recursively call emit(). Framework does not detect cycles.
@@ -37,13 +37,13 @@ class Dispatcher(BaseDispatcher[CallbackT]):
             Python's RecursionError will be raised.
 
         Args:
-            event: Event to dispatch.
+            affair: Affair to dispatch.
 
         Returns:
             Merged dict of all listener results.
 
         Post:
-            event.event_id and event.timestamp set.
+            affair.affair_id and affair.timestamp set.
             All matching listeners executed in priority order.
 
         Raises:
@@ -51,11 +51,11 @@ class Dispatcher(BaseDispatcher[CallbackT]):
             KeyConflictError: If merging dicts causes key conflict.
             RecursionError: If listeners form infinite recursion chain.
         """
-        layers = self._registry.exec_order(type(event))
+        layers = self._registry.exec_order(type(affair))
         merged_result: dict[str, Any] = {}
         for layer in layers:
             for cb in layer:
-                result = cb(event)
+                result = cb(affair)
                 if result is not None:
                     merge_dict(merged_result, result)
         return merged_result

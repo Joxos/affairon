@@ -1,4 +1,4 @@
-# Eventd
+# Affairon
 
 An affair-driven framework oriented around “requirement seams”: expose requirements as **affair hook points**, allowing multiple callbacks to collaborate on a single seam and merge results.
 
@@ -7,7 +7,7 @@ An affair-driven framework oriented around “requirement seams”: expose requi
 ## Positioning & Philosophy
 
 Traditional extension often means “write new code + modify existing code.”
-eventd’s stance: treat a requirement as an affair hook point; callbacks that implement the affair’s functionality attach like **plugins**. Calling the seam (an **affair call**) is like calling a **large extensible function**:
+affaird’s stance: treat a requirement as an affair hook point; callbacks that implement the affair’s functionality attach like **plugins**. Calling the seam (an **affair call**) is like calling a **large extensible function**:
 
 - Multiple callbacks collaborate on the same seam
 - Callback results are merged and returned
@@ -41,7 +41,7 @@ This paradigm is not “universal,” but its gains and costs are both clear:
 - Composition and extension increase maintenance cost (versioning, compatibility, testing)
 - Abstraction introduces performance overhead (mitigate via hot-path consolidation)
 
-eventd’s long-term goal: reduce costs and risks via framework assistance (affair stack, conflict detection, evolving policies).
+affaird’s long-term goal: reduce costs and risks via framework assistance (affair stack, conflict detection, evolving policies).
 
 ---
 

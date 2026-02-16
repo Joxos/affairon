@@ -1,29 +1,29 @@
-"""Exception hierarchy for eventd.
+"""Exception hierarchy for affairon.
 
-All custom exceptions inherit from EventdError base class.
+All custom exceptions inherit from AffairdError base class.
 """
 
 
-class EventdError(Exception):
-    """Base exception for all eventd errors.
+class AffairdError(Exception):
+    """Base exception for all affairon errors.
 
-    All custom exceptions in the eventd framework inherit from this class,
+    All custom exceptions in the affairon framework inherit from this class,
     allowing users to catch all framework-specific errors with a single except clause.
     """
 
 
-class EventValidationError(EventdError, ValueError):
-    """Event validation failed.
+class AffairValidationError(AffairdError, ValueError):
+    """Affair validation failed.
 
     Raised when:
-    - User-provided event fields fail pydantic validation
-    - Reserved fields (event_id, timestamp) are provided during construction
+    - User-provided affair fields fail pydantic validation
+    - Reserved fields (affair_id, timestamp) are provided during construction
 
     This wraps pydantic.ValidationError to provide a framework-specific exception type.
     """
 
 
-class CyclicDependencyError(EventdError, ValueError):
+class CyclicDependencyError(AffairdError, ValueError):
     """Cyclic dependency detected in listener after chain.
 
     Raised when:
@@ -34,7 +34,7 @@ class CyclicDependencyError(EventdError, ValueError):
     """
 
 
-class KeyConflictError(EventdError, ValueError):
+class KeyConflictError(AffairdError, ValueError):
     """Key conflict when merging listener return values.
 
     Raised when multiple listeners return dictionaries with overlapping keys.

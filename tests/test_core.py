@@ -1,46 +1,46 @@
-"""Core tests for eventd — 15 cases covering all essential behaviors."""
+"""Core tests for affairon — 15 cases covering all essential behaviors."""
 
 import pytest
 from pydantic import ValidationError
 
-from eventd import (
+from affairon import (
     Dispatcher,
-    Event,
-    EventValidationError,
+    Affair,
+    AffairValidationError,
     KeyConflictError,
 )
-from eventd.async_dispatcher import AsyncDispatcher
-from eventd.exceptions import CyclicDependencyError
+from affairon.async_dispatcher import AsyncDispatcher
+from affairon.exceptions import CyclicDependencyError
 
 # -- shared fixtures ----------------------------------------------------------
 
 
-class Ping(Event):
+class Ping(Affair):
     msg: str
 
 
-class Pong(Event):
+class Pong(Affair):
     msg: str
 
 
-# -- 1. Event model -----------------------------------------------------------
+# -- 1. Affair model -----------------------------------------------------------
 
 
-class TestEvent:
+class TestAffair:
     def test_custom_fields(self):
         """1.1 — user-defined fields work."""
         e = Ping(msg="hi")
         assert e.msg == "hi"
 
     def test_validation_wraps_pydantic(self):
-        """1.3 — missing required field → EventValidationError."""
-        with pytest.raises(EventValidationError):
+        """1.3 — missing required field → AffairValidationError."""
+        with pytest.raises(AffairValidationError):
             Ping()  # type: ignore[call-arg]
-        with pytest.raises(EventValidationError):
+        with pytest.raises(AffairValidationError):
             Ping(msg=1)  # type: ignore[call-arg]
 
     def test_frozen(self):
-        """1.4 — Event instances are immutable."""
+        """1.4 — Affair instances are immutable."""
         e = Ping(msg="hi")
         with pytest.raises(ValidationError):
             e.msg = "bye"  # type: ignore[misc]
@@ -59,8 +59,8 @@ class TestRegistry:
         """2.6 — after=[a] guarantees b runs after a."""
         reg = self._make()
 
-        def a(e: Event) -> None: ...
-        def b(e: Event) -> None: ...
+        def a(e: Affair) -> None: ...
+        def b(e: Affair) -> None: ...
 
         reg.add([Ping], a)
         reg.add([Ping], b, after=[a])
@@ -72,8 +72,8 @@ class TestRegistry:
         """2.7 — after referencing unknown callback → ValueError."""
         reg = self._make()
 
-        def a(e: Event) -> None: ...
-        def ghost(e: Event) -> None: ...
+        def a(e: Affair) -> None: ...
+        def ghost(e: Affair) -> None: ...
 
         with pytest.raises(ValueError):
             reg.add([Ping], a, after=[ghost])
@@ -82,8 +82,8 @@ class TestRegistry:
         """2.8 — circular after chain → CyclicDependencyError."""
         reg = self._make()
 
-        def a(e: Event) -> None: ...
-        def b(e: Event) -> None: ...
+        def a(e: Affair) -> None: ...
+        def b(e: Affair) -> None: ...
 
         reg.add([Ping], a)
         reg.add([Ping], b, after=[a])
@@ -94,7 +94,7 @@ class TestRegistry:
         """2.9 — removed callback no longer in exec_order."""
         reg = self._make()
 
-        def a(e: Event) -> None: ...
+        def a(e: Affair) -> None: ...
 
         reg.add([Ping], a)
         reg.remove([Ping], a)
@@ -126,7 +126,7 @@ class TestSyncDispatcher:
         called = []
 
         @d.on(Ping)
-        def handler(e: Event) -> None:
+        def handler(e: Affair) -> None:
             called.append(e)
 
         d.emit(Ping(msg="hi"))
@@ -143,11 +143,11 @@ class TestAsyncDispatcher:
         d = AsyncDispatcher()
 
         @d.on(Ping)
-        async def h1(e: Event) -> dict:
+        async def h1(e: Affair) -> dict:
             return {"a": 1}
 
         @d.on(Ping)
-        async def h2(e: Event) -> dict:
+        async def h2(e: Affair) -> dict:
             return {"b": 2}
 
         result = await d.emit(Ping(msg="x"))
@@ -159,11 +159,11 @@ class TestAsyncDispatcher:
         d = AsyncDispatcher()
 
         @d.on(Ping)
-        async def bad1(e: Event) -> dict:
+        async def bad1(e: Affair) -> dict:
             raise ValueError("e1")
 
         @d.on(Ping)
-        async def bad2(e: Event) -> dict:
+        async def bad2(e: Affair) -> dict:
             raise ValueError("e2")
 
         with pytest.raises(ExceptionGroup) as exc_info:
@@ -175,29 +175,29 @@ class TestAsyncDispatcher:
 
 
 class TestUnregister:
-    def test_mode1_specific_callback_specific_event(self):
-        """5.17 — unregister(Event, callback=cb) removes only that pair."""
+    def test_mode1_specific_callback_specific_affair(self):
+        """5.17 — unregister(Affair, callback=cb) removes only that pair."""
         d = Dispatcher()
 
-        def h(e: Event) -> None: ...
+        def h(e: Affair) -> None: ...
 
         d.register(Ping, h)
         d.unregister(Ping, callback=h)
         assert d.emit(Ping(msg="x")) == {}
 
-    def test_mode2_all_listeners_from_event(self):
-        """5.18 — unregister(Event) clears all listeners for that event."""
+    def test_mode2_all_listeners_from_affair(self):
+        """5.18 — unregister(Affair) clears all listeners for that affair."""
         d = Dispatcher()
         d.register(Ping, lambda e: {"a": 1})
         d.register(Ping, lambda e: {"b": 2})
         d.unregister(Ping)
         assert d.emit(Ping(msg="x")) == {}
 
-    def test_mode3_callback_from_all_events(self):
+    def test_mode3_callback_from_all_affairs(self):
         """5.19 — unregister(callback=cb) removes it everywhere."""
         d = Dispatcher()
 
-        def h(e: Event) -> None: ...
+        def h(e: Affair) -> None: ...
 
         d.register([Ping, Pong], h)
         d.unregister(callback=h)

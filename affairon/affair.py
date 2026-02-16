@@ -1,0 +1,86 @@
+"""Affair model for affairon.
+
+This module provides the Affair base class and MetaAffair framework for
+affair-driven architecture.
+"""
+
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from affairon.exceptions import AffairValidationError
+
+class MutableAffair(BaseModel):
+    """Mutable version of Affair. Also serves as base class for Affair to wrap pydantic validation.
+    """
+
+    def __init__(self, **data: Any) -> None:
+        """Wrap pydantic ValidationError into AffairValidationError."""
+        try:
+            super().__init__(**data)
+        except ValidationError as exc:
+            raise AffairValidationError(str(exc)) from exc
+
+class Affair(MutableAffair):
+    """Base class for all affairs.
+
+    Users should inherit from this class to define custom affairs with
+    additional fields. Instances are immutable (frozen).
+
+    Example:
+        >>> class UserAffair(Affair):
+        ...     user_id: int
+        ...     action: str
+        >>> affair = UserAffair(user_id=123, action="login")
+
+    Raises:
+        AffairValidationError: If fields fail pydantic validation.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+
+
+class MetaAffair(Affair):
+    """Base class for framework meta-affairs.
+
+    MetaAffair describes framework internal behaviors (errors, dead letters, etc.).
+    Users can register listeners on MetaAffair subclasses to observe and extend
+    framework behavior.
+
+    Note:
+        MVP stage only defines MetaAffair types without auto-emission.
+        Future versions will emit MetaAffairs for error handling and observability.
+    """
+
+
+class CallbackErrorAffair(MetaAffair):
+    """Meta-affair emitted when a listener raises an exception.
+
+    Attributes:
+        listener_name: Name of the failed listener.
+        original_affair_type: Type name of the affair being processed.
+        error_message: Exception message.
+        error_type: Exception type name.
+    """
+
+    listener_name: str
+    original_affair_type: str
+    error_message: str
+    error_type: str
+
+
+class AffairDeadLetteredAffair(MetaAffair):
+    """Meta-affair emitted when an affair enters the dead letter queue.
+
+    Attributes:
+        listener_name: Name of the listener that failed processing.
+        original_affair_type: Type name of the dead-lettered affair.
+        error_message: Reason for entering dead letter queue.
+        retry_count: Number of retry attempts before dead-lettering.
+    """
+
+    listener_name: str
+    original_affair_type: str
+    error_message: str
+    retry_count: int
