@@ -8,7 +8,7 @@ type changes easier to manage.
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from affairon.affair import Affair
+from affairon.affairs import Affair
 
 StandardResultT = dict[str, Any] | None
 CallbackT = Callable[[Affair], StandardResultT]

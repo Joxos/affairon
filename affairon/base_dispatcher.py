@@ -1,4 +1,4 @@
-from affairon.affair import Affair
+from affairon.affairs import Affair
 from affairon.registry import BaseRegistry
 
 

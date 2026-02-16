@@ -8,7 +8,7 @@ from collections import defaultdict
 
 import networkx as nx
 
-from affairon.affair import Affair
+from affairon.affairs import Affair
 from affairon.exceptions import CyclicDependencyError
 
 

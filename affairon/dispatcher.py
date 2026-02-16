@@ -10,7 +10,7 @@ from affairon._types import (
     CallbackT,
 )
 from affairon.base_dispatcher import BaseDispatcher
-from affairon.affair import Affair
+from affairon.affairs import Affair
 from affairon.utils import merge_dict
 
 

@@ -8,7 +8,7 @@ __version__ = "0.1.0"
 
 from affairon.async_dispatcher import AsyncDispatcher
 from affairon.dispatcher import Dispatcher
-from affairon.affair import CallbackErrorAffair, Affair, AffairDeadLetteredAffair, MetaAffair, MutableAffair
+from affairon.affairs import CallbackErrorAffair, Affair, AffairDeadLetteredAffair, MetaAffair, MutableAffair
 from affairon.exceptions import (
     CyclicDependencyError,
     AffairdError,

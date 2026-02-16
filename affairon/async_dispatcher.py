@@ -1,6 +1,6 @@
 from affairon._types import AsyncCallbackT
 from affairon.base_dispatcher import BaseDispatcher
-from affairon.affair import Affair
+from affairon.affairs import Affair
 from affairon.utils import merge_dict
 
 
@@ -53,9 +53,9 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
         for layer in layers:
             tasks = []
             try:
-                async with asyncio.TaskGroup() as tg:
+                async with asyncio.TaskGroup() as group:
                     for i, callback in enumerate(layer):
-                        tasks.append(tg.create_task(callback(affair)))
+                        tasks.append(group.create_task(callback(affair)))
             except* Exception:
                 # Let ExceptionGroup propagate
                 raise
