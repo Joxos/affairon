@@ -8,7 +8,7 @@ from collections import defaultdict
 
 import networkx as nx
 
-from affairon.affairs import Affair
+from affairon.affairs import MutableAffair
 from affairon.exceptions import CyclicDependencyError
 
 
@@ -29,18 +29,20 @@ class BaseRegistry[CB]:
             _graphs is empty dict mapping affair types to DiGraphs.
         """
         self._guardian = guardian
-        self._graphs: defaultdict[type[Affair], nx.DiGraph[CB]] = defaultdict(nx.DiGraph)
+        self._graphs: defaultdict[type[MutableAffair], nx.DiGraph[CB]] = defaultdict(
+            nx.DiGraph
+        )
 
     def add(
         self,
-        affair_types: list[type[Affair]],
+        affair_types: list[type[MutableAffair]],
         callback: CB,
         after: list[CB] | None = None,
     ) -> None:
         """Register a listener for specified affair types.
 
         Args:
-            affair_types: Affair types to register for.
+            affair_types: MutableAffair types to register for.
             callback: Listener callback function.
             after: List of callbacks that should run before this one.
 
@@ -89,7 +91,7 @@ class BaseRegistry[CB]:
 
     def remove(
         self,
-        affair_types: list[type[Affair]] | None,
+        affair_types: list[type[MutableAffair]] | None,
         callback: CB | None,
     ) -> None:
         """Remove listeners from registry.
@@ -100,7 +102,7 @@ class BaseRegistry[CB]:
         - (None, callback): Remove callback from all affair types.
 
         Args:
-            affair_types: Affair types to remove from, or None for all.
+            affair_types: MutableAffair types to remove from, or None for all.
             callback: Callback to remove, or None for all.
 
         Post:
@@ -149,14 +151,14 @@ class BaseRegistry[CB]:
             for affair_type in affairs_to_clean:
                 del self._graphs[affair_type]
 
-    def exec_order(self, affair_type: type[Affair]) -> list[list[CB]]:
+    def exec_order(self, affair_type: type[MutableAffair]) -> list[list[CB]]:
         """Return execution order for an affair type using breadth-first enumeration.
 
         Performs a breadth-first traversal of the dependency graph for the affair type
         and returns a 2D list of callbacks in layers of execution order.
 
         Args:
-            affair_type: Affair type to resolve.
+            affair_type: MutableAffair type to resolve.
 
         Returns:
             2D list of callbacks in layers of execution order (dependencies before dependents).

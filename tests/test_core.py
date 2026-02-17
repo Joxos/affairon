@@ -4,9 +4,10 @@ import pytest
 from pydantic import ValidationError
 
 from affairon import (
-    Dispatcher,
+    MutableAffair,
     Affair,
     AffairValidationError,
+    Dispatcher,
     KeyConflictError,
 )
 from affairon.async_dispatcher import AsyncDispatcher
@@ -59,8 +60,8 @@ class TestRegistry:
         """2.6 — after=[a] guarantees b runs after a."""
         reg = self._make()
 
-        def a(e: Affair) -> None: ...
-        def b(e: Affair) -> None: ...
+        def a(e: MutableAffair) -> None: ...
+        def b(e: MutableAffair) -> None: ...
 
         reg.add([Ping], a)
         reg.add([Ping], b, after=[a])
@@ -72,8 +73,8 @@ class TestRegistry:
         """2.7 — after referencing unknown callback → ValueError."""
         reg = self._make()
 
-        def a(e: Affair) -> None: ...
-        def ghost(e: Affair) -> None: ...
+        def a(e: MutableAffair) -> None: ...
+        def ghost(e: MutableAffair) -> None: ...
 
         with pytest.raises(ValueError):
             reg.add([Ping], a, after=[ghost])
@@ -82,8 +83,8 @@ class TestRegistry:
         """2.8 — circular after chain → CyclicDependencyError."""
         reg = self._make()
 
-        def a(e: Affair) -> None: ...
-        def b(e: Affair) -> None: ...
+        def a(e: MutableAffair) -> None: ...
+        def b(e: MutableAffair) -> None: ...
 
         reg.add([Ping], a)
         reg.add([Ping], b, after=[a])
@@ -94,7 +95,7 @@ class TestRegistry:
         """2.9 — removed callback no longer in exec_order."""
         reg = self._make()
 
-        def a(e: Affair) -> None: ...
+        def a(e: MutableAffair) -> None: ...
 
         reg.add([Ping], a)
         reg.remove([Ping], a)
@@ -126,7 +127,7 @@ class TestSyncDispatcher:
         called = []
 
         @d.on(Ping)
-        def handler(e: Affair) -> None:
+        def handler(e: MutableAffair) -> None:
             called.append(e)
 
         d.emit(Ping(msg="hi"))
@@ -143,11 +144,11 @@ class TestAsyncDispatcher:
         d = AsyncDispatcher()
 
         @d.on(Ping)
-        async def h1(e: Affair) -> dict:
+        async def h1(e: MutableAffair) -> dict:
             return {"a": 1}
 
         @d.on(Ping)
-        async def h2(e: Affair) -> dict:
+        async def h2(e: MutableAffair) -> dict:
             return {"b": 2}
 
         result = await d.emit(Ping(msg="x"))
@@ -159,11 +160,11 @@ class TestAsyncDispatcher:
         d = AsyncDispatcher()
 
         @d.on(Ping)
-        async def bad1(e: Affair) -> dict:
+        async def bad1(e: MutableAffair) -> dict:
             raise ValueError("e1")
 
         @d.on(Ping)
-        async def bad2(e: Affair) -> dict:
+        async def bad2(e: MutableAffair) -> dict:
             raise ValueError("e2")
 
         with pytest.raises(ExceptionGroup) as exc_info:
@@ -179,7 +180,7 @@ class TestUnregister:
         """5.17 — unregister(Affair, callback=cb) removes only that pair."""
         d = Dispatcher()
 
-        def h(e: Affair) -> None: ...
+        def h(e: MutableAffair) -> None: ...
 
         d.register(Ping, h)
         d.unregister(Ping, callback=h)
@@ -197,7 +198,7 @@ class TestUnregister:
         """5.19 — unregister(callback=cb) removes it everywhere."""
         d = Dispatcher()
 
-        def h(e: Affair) -> None: ...
+        def h(e: MutableAffair) -> None: ...
 
         d.register([Ping, Pong], h)
         d.unregister(callback=h)

@@ -8,8 +8,8 @@ type changes easier to manage.
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from affairon.affairs import Affair
+from affairon.affairs import MutableAffair
 
 StandardResultT = dict[str, Any] | None
-CallbackT = Callable[[Affair], StandardResultT]
-AsyncCallbackT = Callable[[Affair], Coroutine[Any, Any, StandardResultT]]
+CallbackT = Callable[[MutableAffair], StandardResultT]
+AsyncCallbackT = Callable[[MutableAffair], Coroutine[Any, Any, StandardResultT]]

@@ -1,7 +1,6 @@
-from affairon.exceptions import KeyConflictError
-
-
 from typing import Any
+
+from affairon.exceptions import KeyConflictError
 
 
 def merge_dict(target: dict[str, Any], source: dict[str, Any]) -> None:

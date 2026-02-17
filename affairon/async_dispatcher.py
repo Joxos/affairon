@@ -1,11 +1,10 @@
-from affairon._types import AsyncCallbackT
-from affairon.base_dispatcher import BaseDispatcher
-from affairon.affairs import Affair
-from affairon.utils import merge_dict
-
-
 import asyncio
 from typing import Any
+
+from affairon._types import AsyncCallbackT
+from affairon.affairs import MutableAffair
+from affairon.base_dispatcher import BaseDispatcher
+from affairon.utils import merge_dict
 
 
 class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
@@ -17,13 +16,13 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
     """
 
     @staticmethod
-    async def _sample_guardian(affair: Affair) -> None:
+    async def _sample_guardian(affair: MutableAffair) -> None:
         """Silent guardian callback to anchor execution order."""
 
     def __init__(self):
         super().__init__(self._sample_guardian)
 
-    async def emit(self, affair: Affair) -> dict[str, Any]:
+    async def emit(self, affair: MutableAffair) -> dict[str, Any]:
         """Asynchronously dispatch affair.
 
         Warning:
@@ -32,7 +31,7 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
             Python's RecursionError will be raised (default stack depth: 1000).
 
         Args:
-            affair: Affair to dispatch.
+            affair: MutableAffair to dispatch.
 
         Returns:
             Merged dict of all listener results.

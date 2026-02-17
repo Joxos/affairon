@@ -9,8 +9,8 @@ from typing import Any
 from affairon._types import (
     CallbackT,
 )
+from affairon.affairs import MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
-from affairon.affairs import Affair
 from affairon.utils import merge_dict
 
 
@@ -22,13 +22,13 @@ class Dispatcher(BaseDispatcher[CallbackT]):
     """
 
     @staticmethod
-    def _sample_guardian(affair: Affair) -> None:
+    def _sample_guardian(affair: MutableAffair) -> None:
         """Silent guardian callback to anchor execution order."""
 
     def __init__(self):
         super().__init__(self._sample_guardian)
 
-    def emit(self, affair: Affair) -> dict[str, Any]:
+    def emit(self, affair: MutableAffair) -> dict[str, Any]:
         """Synchronously dispatch affair.
 
         Warning:
@@ -37,7 +37,7 @@ class Dispatcher(BaseDispatcher[CallbackT]):
             Python's RecursionError will be raised.
 
         Args:
-            affair: Affair to dispatch.
+            affair: MutableAffair to dispatch.
 
         Returns:
             Merged dict of all listener results.
@@ -59,5 +59,3 @@ class Dispatcher(BaseDispatcher[CallbackT]):
                 if result is not None:
                     merge_dict(merged_result, result)
         return merged_result
-
-

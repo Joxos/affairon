@@ -6,13 +6,19 @@ and asynchronous dispatch modes.
 
 __version__ = "0.1.0"
 
+from affairon.affairs import (
+    Affair,
+    AffairDeadLetteredAffair,
+    CallbackErrorAffair,
+    MetaAffair,
+    MutableAffair,
+)
 from affairon.async_dispatcher import AsyncDispatcher
 from affairon.dispatcher import Dispatcher
-from affairon.affairs import CallbackErrorAffair, Affair, AffairDeadLetteredAffair, MetaAffair, MutableAffair
 from affairon.exceptions import (
-    CyclicDependencyError,
     AffairdError,
     AffairValidationError,
+    CyclicDependencyError,
     KeyConflictError,
 )
 

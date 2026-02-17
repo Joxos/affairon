@@ -10,9 +10,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from affairon.exceptions import AffairValidationError
 
+
 class MutableAffair(BaseModel):
-    """Mutable version of Affair. Also serves as base class for Affair to wrap pydantic validation.
-    """
+    """Mutable version of Affair. Also serves as base class for Affair to wrap pydantic validation."""
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid", strict=True)
 
     def __init__(self, **data: Any) -> None:
         """Wrap pydantic ValidationError into AffairValidationError."""
@@ -20,6 +22,7 @@ class MutableAffair(BaseModel):
             super().__init__(**data)
         except ValidationError as exc:
             raise AffairValidationError(str(exc)) from exc
+
 
 class Affair(MutableAffair):
     """Base class for all affairs.
@@ -37,8 +40,7 @@ class Affair(MutableAffair):
         AffairValidationError: If fields fail pydantic validation.
     """
 
-    model_config = ConfigDict(frozen=True)
-
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
 
 class MetaAffair(Affair):

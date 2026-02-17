@@ -1,10 +1,9 @@
-from affairon.affairs import Affair
-from affairon.registry import BaseRegistry
-
-
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
+
+from affairon.affairs import MutableAffair
+from affairon.registry import BaseRegistry
 
 
 class BaseDispatcher[CB](ABC):
@@ -32,13 +31,13 @@ class BaseDispatcher[CB](ABC):
 
     def on(
         self,
-        *affair_types: type[Affair],
+        *affair_types: type[MutableAffair],
         after: list[CB] | None = None,
     ) -> Callable[[CB], CB]:
         """Decorator to register listener.
 
         Args:
-            affair_types: Affair types to listen for.
+            affair_types: MutableAffair types to listen for.
             after: List of callbacks that must execute before this one.
 
         Returns:
@@ -60,7 +59,7 @@ class BaseDispatcher[CB](ABC):
 
     def register(
         self,
-        affair_types: type[Affair] | list[type[Affair]],
+        affair_types: type[MutableAffair] | list[type[MutableAffair]],
         callback: CB,
         *,
         after: list[CB] | None = None,
@@ -68,7 +67,7 @@ class BaseDispatcher[CB](ABC):
         """Register listener via method call.
 
         Args:
-            affair_types: Affair type(s) to listen for.
+            affair_types: MutableAffair type(s) to listen for.
             callback: Callback function.
             after: List of callbacks that must execute before this one.
 
@@ -86,7 +85,7 @@ class BaseDispatcher[CB](ABC):
 
     def unregister(
         self,
-        *affair_types: type[Affair],
+        *affair_types: type[MutableAffair],
         callback: CB | None = None,
     ) -> None:
         """Unregister listeners.
@@ -97,7 +96,7 @@ class BaseDispatcher[CB](ABC):
         - (callback=cb): Remove callback from all affair types.
 
         Args:
-            *affair_types: Affair types to remove from (variadic).
+            *affair_types: MutableAffair types to remove from (variadic).
             callback: Callback to remove, or None for all.
 
         Post:
@@ -114,11 +113,11 @@ class BaseDispatcher[CB](ABC):
         self._registry.remove(normalized_types, callback)
 
     @abstractmethod
-    def emit(self, affair: Affair) -> Any:
+    def emit(self, affair: MutableAffair) -> Any:
         """Dispatch affair to listeners.
 
         Args:
-            affair: Affair to dispatch.
+            affair: MutableAffair to dispatch.
 
         Returns:
             Merged dict of all listener results (sync or async).
