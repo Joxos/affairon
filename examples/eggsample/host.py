@@ -41,9 +41,9 @@ def main() -> None:
 
 class EggsellentCook:
     FAVORITE_INGREDIENTS = (
-        "egg",
-        "egg",
-        "egg",
+        str("egg"),  # noqa
+        str("egg"),  # noqa
+        str("egg"),  # noqa
     )  # to avoid mutation issues when casting to list
 
     def __init__(self, dispatcher: Dispatcher):
@@ -67,7 +67,7 @@ class EggsellentCook:
         # So it is necessary to change condiments_tray globally here.
         global condiments_tray
         affair = PrepCondiments(condiments=condiments_tray)
-        condiment_comments = self.dispatcher.emit(affair)
+        condiment_comments = self.dispatcher.emit(affair).values()
         condiments_tray = affair.condiments
         print(f"Your food. Enjoy some {', '.join(self.ingredients)}")
         print(f"Some condiments? We have {', '.join(condiments_tray.keys())}")
