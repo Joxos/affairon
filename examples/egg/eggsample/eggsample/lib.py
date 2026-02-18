@@ -1,5 +1,5 @@
 from affairon import default_dispatcher as dispatcher
-from examples.eggsample.affairs import AddIngredients, PrepCondiments
+from eggsample.affairs import AddIngredients, PrepCondiments
 
 
 @dispatcher.on(AddIngredients)

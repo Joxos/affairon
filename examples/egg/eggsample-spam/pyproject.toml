@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eggsample-spam"
+version = "0.2.0"
+description = "Spam plugin for the eggsample affairon example"
+requires-python = ">=3.12"
+dependencies = [
+    "affairon",
+]
+
+[project.entry-points."affairon.plugins"]
+eggsample-spam = "eggsample_spam.lib"
+
+[tool.uv.sources]
+affairon = { path = "../../../", editable = true }

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eggsample"
+version = "0.1.0"
+description = "Affairon example: egg-based meal preparation host application"
+requires-python = ">=3.12"
+dependencies = [
+    "affairon",
+    "eggsample-spam",
+]
+
+[tool.affairon]
+plugins = ["eggsample-spam>0.1.0"]
+
+[tool.uv.sources]
+affairon = { path = "../../../", editable = true }
+eggsample-spam = { path = "../eggsample-spam", editable = true }

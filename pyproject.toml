@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.0",
     "loguru>=0.7",
     "networkx>=3.6.1",
+    "packaging>=23.0",
 ]
 
 [project.optional-dependencies]

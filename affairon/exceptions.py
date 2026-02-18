@@ -41,3 +41,34 @@ class KeyConflictError(AffairdError, ValueError):
     Users must ensure listener return values have unique keys, or handle
     conflicts by restructuring their return values.
     """
+
+
+# -- Plugin errors ------------------------------------------------------------
+
+
+class PluginError(AffairdError):
+    """Base exception for plugin loading errors."""
+
+
+class PluginNotFoundError(PluginError):
+    """Required plugin package is not installed.
+
+    Raised when a plugin declared in [tool.affairon] plugins list
+    cannot be found among installed packages.
+    """
+
+
+class PluginVersionError(PluginError):
+    """Installed plugin version does not satisfy the requirement specifier.
+
+    Raised when a plugin is installed but its version does not match
+    the version constraint declared by the host application.
+    """
+
+
+class PluginEntryPointError(PluginError):
+    """Plugin has no entry point in the 'affairon' group.
+
+    Raised when a plugin package is installed but does not declare
+    an entry point in the 'affairon' entry point group.
+    """

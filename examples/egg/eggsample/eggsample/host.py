@@ -17,11 +17,17 @@ from pathlib import Path
 
 from affairon import Dispatcher
 from affairon import default_dispatcher as dispatcher
-from affairon.composer import ModuleLoader
-from examples.eggsample.affairs import AddIngredients, PrepCondiments
+from affairon.composer import PluginComposer
+from eggsample.affairs import AddIngredients, PrepCondiments
 
-module_loader = ModuleLoader()
-module_loader.discover_modules(Path(__file__).parent.parent)
+# Load the host's own callbacks first
+import eggsample.lib  # noqa: F401 — registers base callbacks via decorators
+
+# Then load declared plugins from pyproject.toml
+plugin_composer = PluginComposer()
+plugin_composer.compose_from_pyproject(
+    Path(__file__).resolve().parent.parent / "pyproject.toml"
+)
 
 
 condiments_tray = {
