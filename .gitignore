@@ -8,3 +8,6 @@ __pycache__/
 
 # IDEs
 .vscode/
+
+# Others
+.ai/
