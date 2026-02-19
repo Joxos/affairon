@@ -4,6 +4,7 @@ This module provides the Affair base class and MetaAffair framework for
 affair-driven architecture.
 """
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -46,13 +47,10 @@ class Affair(MutableAffair):
 class MetaAffair(Affair):
     """Base class for framework meta-affairs.
 
-    MetaAffair describes framework internal behaviors (errors, dead letters, etc.).
-    Users can register listeners on MetaAffair subclasses to observe and extend
-    framework behavior.
-
-    Note:
-        MVP stage only defines MetaAffair types without auto-emission.
-        Future versions will emit MetaAffairs for error handling and observability.
+    MetaAffair describes framework-level lifecycle and observability affairs.
+    Users can register listeners on MetaAffair subclasses to hook into
+    framework behavior (e.g. application start via ``AffairMain``, error
+    handling via ``CallbackErrorAffair``).
     """
 
 
@@ -86,3 +84,17 @@ class AffairDeadLetteredAffair(MetaAffair):
     original_affair_type: str
     error_message: str
     retry_count: int
+
+
+class AffairMain(MetaAffair):
+    """Meta-affair emitted by fairun to start the application.
+
+    The CLI runner ``fairun`` reads ``pyproject.toml``, composes plugins,
+    then emits this affair on the default dispatcher.  User applications
+    register a callback on ``AffairMain`` to define their entry point.
+
+    Attributes:
+        project_path: Resolved path to the project directory.
+    """
+
+    project_path: Path = Path(".").resolve()

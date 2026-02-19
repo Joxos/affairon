@@ -9,6 +9,7 @@ __version__ = "0.1.0"
 from affairon.affairs import (
     Affair,
     AffairDeadLetteredAffair,
+    AffairMain,
     CallbackErrorAffair,
     MetaAffair,
     MutableAffair,
@@ -35,6 +36,7 @@ __all__ = [
     # Affair classes
     "Affair",
     "MetaAffair",
+    "AffairMain",
     "CallbackErrorAffair",
     "AffairDeadLetteredAffair",
     "MutableAffair",
