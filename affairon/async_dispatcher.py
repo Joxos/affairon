@@ -1,13 +1,13 @@
 import asyncio
 from typing import Any
 
-from affairon._types import AsyncCallbackT
+from affairon._types import AsyncCallback
 from affairon.affairs import MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
 from affairon.utils import merge_dict
 
 
-class AsyncDispatcher(BaseDispatcher[AsyncCallbackT]):
+class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
     """Asynchronous affair dispatcher.
 
     Executes listeners asynchronously with same-priority parallelism.

@@ -21,10 +21,6 @@ from affairon.exceptions import (
     AffairValidationError,
     CyclicDependencyError,
     KeyConflictError,
-    PluginEntryPointError,
-    PluginError,
-    PluginNotFoundError,
-    PluginVersionError,
 )
 
 # Module-level default dispatcher instance
@@ -49,8 +45,4 @@ __all__ = [
     "AffairValidationError",
     "CyclicDependencyError",
     "KeyConflictError",
-    "PluginError",
-    "PluginNotFoundError",
-    "PluginVersionError",
-    "PluginEntryPointError",
 ]

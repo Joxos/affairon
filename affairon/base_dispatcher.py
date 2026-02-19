@@ -29,12 +29,17 @@ class BaseDispatcher[CB](ABC):
         self._guardian = guardian
         self._registry = BaseRegistry[CB](self._guardian)
 
-    def on(
+    def on[A: MutableAffair, R: (dict[str, Any] | None)](
         self,
-        *affair_types: type[MutableAffair],
-        after: list[CB] | None = None,
-    ) -> Callable[[CB], CB]:
+        *affair_types: type[A],
+        after: list[Callable[..., Any]] | None = None,
+    ) -> Callable[[Callable[[A], R]], Callable[[A], R]]:
         """Decorator to register listener.
+
+        Uses dual TypeVar to preserve both the affair parameter type and
+        return type through the decorator, so type checkers see the
+        concrete types used in user code rather than the base
+        ``MutableAffair``.
 
         Args:
             affair_types: MutableAffair types to listen for.
@@ -51,8 +56,8 @@ class BaseDispatcher[CB](ABC):
             CyclicDependencyError: If after forms a cycle.
         """
 
-        def decorator(func: CB) -> CB:
-            self.register(list(affair_types), func, after=after)  # type: ignore
+        def decorator(func: Callable[[A], R]) -> Callable[[A], R]:
+            self.register(list(affair_types), func, after=after)  # type: ignore[arg-type]
             return func
 
         return decorator

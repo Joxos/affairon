@@ -3,14 +3,14 @@
 from typing import Any
 
 from affairon._types import (
-    CallbackT,
+    SyncCallback,
 )
 from affairon.affairs import MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
 from affairon.utils import merge_dict
 
 
-class Dispatcher(BaseDispatcher[CallbackT]):
+class Dispatcher(BaseDispatcher[SyncCallback]):
     """Synchronous affair dispatcher.
 
     Executes listeners synchronously in priority order.
