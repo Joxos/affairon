@@ -98,3 +98,53 @@ class AffairMain(MetaAffair):
     """
 
     project_path: Path = Path(".").resolve()
+
+
+class AffairAware:
+    """Mixin that auto-registers ``@dispatcher.on()`` decorated methods.
+
+    Methods decorated with ``@dispatcher.on()`` inside an ``AffairAware``
+    subclass are not registered at class definition time.  Instead, the
+    decorator stamps metadata on the unbound function, and
+    ``AffairAware.__init__`` registers the *bound* methods when the
+    instance is created.
+
+    Subclasses that override ``__init__`` must call ``super().__init__()``.
+
+    Example::
+
+        class Kitchen(AffairAware):
+            @dispatcher.on(AddIngredients)
+            def cook(self, affair: AddIngredients) -> dict[str, list[str]]:
+                return {"dish": ["eggs"]}
+
+        k = Kitchen()  # cook() is now registered as a bound method
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._bind_affair_methods()
+
+    def _bind_affair_methods(self) -> None:
+        """Scan for marked methods and register them as bound callbacks."""
+        # Collect marked methods across MRO, build unbound → bound mapping
+        unbound_to_bound: dict[Any, Any] = {}
+        marked: list[Any] = []
+
+        seen: set[str] = set()
+        for klass in type(self).__mro__:
+            for name, attr in vars(klass).items():
+                if name in seen:
+                    continue
+                if callable(attr) and hasattr(attr, "_affair_types"):
+                    unbound_to_bound[attr] = getattr(self, name)
+                    marked.append(attr)
+                    seen.add(name)
+
+        # Register each bound method, resolving after references
+        for func in marked:
+            bound = unbound_to_bound[func]
+            after = func._affair_after
+            if after:
+                after = [unbound_to_bound.get(cb, cb) for cb in after]
+            func._affair_dispatcher.register(func._affair_types, bound, after=after)

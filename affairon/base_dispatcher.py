@@ -1,3 +1,4 @@
+import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
@@ -57,7 +58,15 @@ class BaseDispatcher[CB](ABC):
         """
 
         def decorator(func: Callable[[A], R]) -> Callable[[A], R]:
-            self.register(list(affair_types), func, after=after)  # type: ignore[arg-type]
+            params = list(inspect.signature(func).parameters)
+            if params and params[0] == "self":
+                # Unbound method: defer registration to AffairAware.__init__
+                func._affair_types = list(affair_types)  # type: ignore[attr-defined]
+                func._affair_after = after  # type: ignore[attr-defined]
+                func._affair_dispatcher = self  # type: ignore[attr-defined]
+            else:
+                # Plain function: register immediately
+                self.register(list(affair_types), func, after=after)  # type: ignore[arg-type]
             return func
 
         return decorator

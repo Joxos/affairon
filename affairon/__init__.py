@@ -8,6 +8,7 @@ __version__ = "0.1.0"
 
 from affairon.affairs import (
     Affair,
+    AffairAware,
     AffairDeadLetteredAffair,
     AffairMain,
     CallbackErrorAffair,
@@ -33,6 +34,7 @@ __all__ = [
     "Affair",
     "MetaAffair",
     "AffairMain",
+    "AffairAware",
     "CallbackErrorAffair",
     "AffairDeadLetteredAffair",
     "MutableAffair",
