@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [tool.affairon]
-plugins = ["eggsample-spam>0.1.0"]
+plugins = ["eggsample-spam>=0.2.0"]
 
 [tool.uv.sources]
 affairon = { path = "../../../", editable = true }
