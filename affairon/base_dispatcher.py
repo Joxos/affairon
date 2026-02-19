@@ -32,7 +32,7 @@ class BaseDispatcher[CB](ABC):
     def on[A: MutableAffair, R: (dict[str, Any] | None)](
         self,
         *affair_types: type[A],
-        after: list[Callable[..., Any]] | None = None,
+        after: list[Callable[[A], R]] | None = None,
     ) -> Callable[[Callable[[A], R]], Callable[[A], R]]:
         """Decorator to register listener.
 
