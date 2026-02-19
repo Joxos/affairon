@@ -5,18 +5,18 @@ Plugin packages declare entry points in the ``affairon`` group; host
 applications list required plugins (with optional version constraints)
 in ``[tool.affairon]`` of their ``pyproject.toml``.
 
+Local plugins (modules within the host application itself) can also be
+declared via the ``local_plugins`` key and are loaded by direct import.
+
 Typical usage::
 
     from affairon.composer import PluginComposer
 
     composer = PluginComposer()
-    composer.compose(["eggsample-spam>0.1.0"])
-
-Or load from a ``pyproject.toml``::
-
     composer.compose_from_pyproject(Path("pyproject.toml"))
 """
 
+import importlib
 import importlib.metadata
 import tomllib
 from pathlib import Path
@@ -47,10 +47,14 @@ class PluginComposer:
     Host applications specify which plugins to load using PEP 508
     requirement strings, either programmatically or via
     ``[tool.affairon]`` in their ``pyproject.toml``.
+
+    Local plugins (dotted module paths) are loaded via direct import,
+    bypassing the entry point and version check mechanisms.
     """
 
     def __init__(self) -> None:
         self.loaded_plugins: set[str] = set()
+        self.loaded_local_plugins: set[str] = set()
 
     # -- public API -----------------------------------------------------------
 
@@ -81,11 +85,38 @@ class PluginComposer:
             requirement = Requirement(req_str)
             self._load_plugin(requirement)
 
+    def compose_local(self, module_paths: list[str]) -> None:
+        """Load local plugins by importing dotted module paths.
+
+        Each module path is imported directly via ``importlib.import_module``.
+        The import triggers callback registration through decorators.
+
+        Args:
+            module_paths: Dotted module paths, e.g. ``["eggsample.lib"]``.
+        """
+        for module_path in module_paths:
+            if module_path in self.loaded_local_plugins:
+                composer_logger.debug(f"Local plugin already loaded: {module_path}")
+                continue
+
+            try:
+                composer_logger.debug(f"Loading local plugin '{module_path}'")
+                importlib.import_module(module_path)
+                self.loaded_local_plugins.add(module_path)
+                composer_logger.info(f"Local plugin '{module_path}' loaded")
+            except Exception as exc:
+                composer_logger.exception(
+                    f"Failed to load local plugin '{module_path}': {exc}"
+                )
+                raise
+
     def compose_from_pyproject(self, pyproject_path: Path) -> None:
         """Load plugins declared in a ``pyproject.toml`` file.
 
-        Reads the ``[tool.affairon]`` table and extracts the ``plugins``
-        list, then delegates to :meth:`compose`.
+        Reads the ``[tool.affairon]`` table and loads:
+
+        1. ``plugins`` — external plugins via entry points (first).
+        2. ``local_plugins`` — local modules via direct import (second).
 
         Args:
             pyproject_path: Path to the ``pyproject.toml`` file.
@@ -93,15 +124,21 @@ class PluginComposer:
         with open(pyproject_path, "rb") as fh:
             config = tomllib.load(fh)
 
-        plugin_reqs: list[str] = (
-            config.get("tool", {}).get("affairon", {}).get("plugins", [])
-        )
+        affairon_config = config.get("tool", {}).get("affairon", {})
+        plugin_reqs: list[str] = affairon_config.get("plugins", [])
+        local_plugins: list[str] = affairon_config.get("local_plugins", [])
 
-        if not plugin_reqs:
+        if not plugin_reqs and not local_plugins:
             composer_logger.info(f"No plugins declared in {pyproject_path}")
             return
 
-        self.compose(plugin_reqs)
+        # External plugins first
+        if plugin_reqs:
+            self.compose(plugin_reqs)
+
+        # Local plugins second (can override/extend external behavior)
+        if local_plugins:
+            self.compose_local(local_plugins)
 
     # -- internals ------------------------------------------------------------
 
