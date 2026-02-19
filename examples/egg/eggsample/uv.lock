@@ -55,14 +55,23 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "affairon" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "eggsample-spam" },
+]
+spam = [
     { name = "eggsample-spam" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "affairon", editable = "../../../" },
-    { name = "eggsample-spam", editable = "../eggsample-spam" },
+    { name = "eggsample-spam", marker = "extra == 'all'", editable = "../eggsample-spam" },
+    { name = "eggsample-spam", marker = "extra == 'spam'", editable = "../eggsample-spam" },
 ]
+provides-extras = ["spam", "all"]
 
 [[package]]
 name = "eggsample-spam"
@@ -70,10 +79,14 @@ version = "0.2.0"
 source = { editable = "../eggsample-spam" }
 dependencies = [
     { name = "affairon" },
+    { name = "eggsample" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "affairon", editable = "../../../" }]
+requires-dist = [
+    { name = "affairon", editable = "../../../" },
+    { name = "eggsample", editable = "." },
+]
 
 [[package]]
 name = "loguru"

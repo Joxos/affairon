@@ -9,6 +9,7 @@ description = "Spam plugin for the eggsample affairon example"
 requires-python = ">=3.12"
 dependencies = [
     "affairon",
+    "eggsample",
 ]
 
 [project.entry-points."affairon.plugins"]
@@ -16,3 +17,4 @@ eggsample-spam = "eggsample_spam.lib"
 
 [tool.uv.sources]
 affairon = { path = "../../../", editable = true }
+eggsample = { path = "../eggsample", editable = true }

@@ -9,25 +9,18 @@ meal. Here, affairs are the typed extension seams:
 
 Listeners return dicts with *distinct keys* so merges don't conflict. The
 host aggregates the merged dict into final outputs.
+
+Run with fairun::
+
+    fairun examples/egg/eggsample
 """
 
 import itertools
 import random
-from pathlib import Path
 
-from affairon import Dispatcher
+from affairon import AffairMain, Dispatcher
 from affairon import default_dispatcher as dispatcher
-from affairon.composer import PluginComposer
 from eggsample.affairs import AddIngredients, PrepCondiments
-
-# Load the host's own callbacks first
-import eggsample.lib  # noqa: F401 — registers base callbacks via decorators
-
-# Then load declared plugins from pyproject.toml
-plugin_composer = PluginComposer()
-plugin_composer.compose_from_pyproject(
-    Path(__file__).resolve().parent.parent / "pyproject.toml"
-)
 
 
 condiments_tray = {
@@ -37,8 +30,9 @@ condiments_tray = {
 }
 
 
-def main() -> None:
-    # All callbacks are registered via the dispatcher decorator, so we don't need a get_plugin_manager() here!
+@dispatcher.on(AffairMain)
+def main(affair: AffairMain) -> None:
+    """Application entry point, invoked by fairun."""
     cook = EggsellentCook(dispatcher)
     cook.add_ingredients()
     cook.prepare_the_food()
@@ -80,6 +74,5 @@ class EggsellentCook:
         if condiment_comments:
             print("\n".join(condiment_comments))
 
-
 if __name__ == "__main__":
-    main()
+    dispatcher.emit(AffairMain())

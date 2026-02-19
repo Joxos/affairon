@@ -9,11 +9,15 @@ description = "Affairon example: egg-based meal preparation host application"
 requires-python = ">=3.12"
 dependencies = [
     "affairon",
-    "eggsample-spam",
 ]
+
+[project.optional-dependencies]
+spam = ["eggsample-spam>=0.2.0"]
+all = ["eggsample-spam>=0.2.0"]
 
 [tool.affairon]
 plugins = ["eggsample-spam>=0.2.0"]
+local_plugins = ["eggsample.lib", "eggsample.host"]
 
 [tool.uv.sources]
 affairon = { path = "../../../", editable = true }
