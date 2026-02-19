@@ -1,7 +1,7 @@
-"""Registry table for listener management.
+"""Registry for listener management.
 
-This module provides RegistryTable for storing and querying listeners,
-with topological sorting and execution plan caching using NetworkX.
+This module provides BaseRegistry for storing and querying listeners,
+with topological sorting and execution plan layering using NetworkX.
 """
 
 from collections import defaultdict

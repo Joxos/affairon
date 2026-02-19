@@ -1,8 +1,4 @@
-"""Dispatcher implementations for affair handling.
-
-This module provides BaseDispatcher (abstract base), Dispatcher (sync),
-and AsyncDispatcher (async) classes for affair-driven programming.
-"""
+"""Synchronous dispatcher for affair handling."""
 
 from typing import Any
 
