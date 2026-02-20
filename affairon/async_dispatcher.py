@@ -37,7 +37,6 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
             Merged dict of all listener results.
 
         Post:
-            affair.affair_id and affair.timestamp set.
             All matching listeners executed in priority order.
             Same-priority listeners executed in parallel via TaskGroup.
 
@@ -50,17 +49,12 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
         layers = self._registry.exec_order(type(affair))
         merged_result: dict[str, Any] = {}
         for layer in layers:
-            tasks = []
-            try:
-                async with asyncio.TaskGroup() as group:
-                    for i, callback in enumerate(layer):
-                        tasks.append(group.create_task(callback(affair)))
-            except* Exception:
-                # Let ExceptionGroup propagate
-                raise
-            else:
-                for task in tasks:
-                    result = task.result()
-                    if result is not None:
-                        merge_dict(merged_result, result)
+            tasks: list[asyncio.Task[dict[str, Any] | None]] = []
+            async with asyncio.TaskGroup() as group:
+                for callback in layer:
+                    tasks.append(group.create_task(callback(affair)))
+            for task in tasks:
+                result = task.result()
+                if result is not None:
+                    merge_dict(merged_result, result)
         return merged_result

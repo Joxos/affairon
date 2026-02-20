@@ -11,7 +11,6 @@ class BaseDispatcher[CB](ABC):
 
     Provides common functionality for both sync and async dispatchers:
     - Listener registration/unregistration
-    - Metadata injection (affair_id, timestamp)
     - Registry management
 
     Subclasses must implement:
@@ -160,7 +159,6 @@ class BaseDispatcher[CB](ABC):
             Merged dict of all listener results (sync or async).
 
         Post:
-            affair.affair_id and affair.timestamp set.
             All matching listeners executed in order.
 
         Raises:

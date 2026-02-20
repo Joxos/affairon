@@ -39,7 +39,6 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
             Merged dict of all listener results.
 
         Post:
-            affair.affair_id and affair.timestamp set.
             All matching listeners executed in priority order.
 
         Raises:
