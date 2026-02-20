@@ -1,9 +1,9 @@
 """Tests for listener unregistration."""
 
 import pytest
+from conftest import Ping, Pong
 
 from affairon import Dispatcher, MutableAffair
-from conftest import Ping, Pong
 
 
 class TestUnregister:

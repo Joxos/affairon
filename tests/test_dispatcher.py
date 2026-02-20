@@ -1,9 +1,9 @@
 """Tests for synchronous Dispatcher."""
 
 import pytest
+from conftest import Ping
 
 from affairon import Dispatcher, KeyConflictError, MutableAffair
-from conftest import Ping
 
 
 class TestSyncDispatcher:

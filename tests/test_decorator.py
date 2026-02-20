@@ -1,8 +1,8 @@
 """Tests for on() and on_method() decorators."""
 
-from affairon import AffairAware, Dispatcher
 from conftest import Ping, Pong
 
+from affairon import AffairAware, Dispatcher
 
 # =============================================================================
 # on() — plain function immediate registration

@@ -1,10 +1,10 @@
 """Tests for AsyncDispatcher."""
 
 import pytest
+from conftest import Ping
 
 from affairon import MutableAffair
 from affairon.async_dispatcher import AsyncDispatcher
-from conftest import Ping
 
 
 class TestAsyncDispatcher:

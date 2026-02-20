@@ -1,10 +1,10 @@
 """Tests for BaseRegistry dependency graph behavior."""
 
 import pytest
+from conftest import Ping
 
 from affairon import Dispatcher, MutableAffair
 from affairon.exceptions import CyclicDependencyError
-from conftest import Ping
 
 
 class TestRegistry:

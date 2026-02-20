@@ -1,10 +1,10 @@
 """Tests for Affair / MutableAffair model behavior."""
 
 import pytest
+from conftest import Ping
 from pydantic import ValidationError
 
 from affairon import AffairValidationError
-from conftest import MutablePing, Ping
 
 
 class TestAffair:

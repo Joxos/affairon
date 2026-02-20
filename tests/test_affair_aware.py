@@ -1,10 +1,9 @@
 """Tests for AffairAware mixin — class method auto-registration."""
 
-import pytest
+
+from conftest import Ping
 
 from affairon import AffairAware, Dispatcher
-from conftest import Ping, Pong
-
 
 # =============================================================================
 # Basic registration lifecycle
