@@ -101,7 +101,7 @@ class AffairMain(MetaAffair):
 
 
 class AffairAwareMeta(type):
-    """Metaclass that guarantees ``@dispatcher.on()`` method registration.
+    """Metaclass that registers ``@dispatcher.on_method()`` callbacks.
 
     Overrides ``__call__`` so that ``_bind_affair_methods()`` runs
     *after* ``__init__`` returns, regardless of whether the subclass
@@ -115,24 +115,33 @@ class AffairAwareMeta(type):
 
 
 class AffairAware(metaclass=AffairAwareMeta):
-    """Mixin that auto-registers ``@dispatcher.on()`` decorated methods.
+    """Mixin that auto-registers ``@dispatcher.on_method()`` decorated methods.
 
-    Methods decorated with ``@dispatcher.on()`` inside an ``AffairAware``
-    subclass are not registered at class definition time.  Instead, the
-    decorator stamps metadata on the unbound function, and the
-    ``AffairAwareMeta`` metaclass registers the *bound* methods
+    Methods decorated with ``@dispatcher.on_method()`` inside an
+    ``AffairAware`` subclass are not registered at class definition time.
+    Instead, the decorator stamps metadata on the unbound function, and
+    the ``AffairAwareMeta`` metaclass registers the *bound* methods
     automatically after ``__init__`` completes.
 
+    Use ``on_method()`` (not ``on()``) for class methods.
     No ``super().__init__()`` call is required.
+
+    ``@staticmethod`` and ``@classmethod`` are supported — place them
+    **outside** ``@on_method()``:
 
     Example::
 
         class Kitchen(AffairAware):
-            @dispatcher.on(AddIngredients)
+            @dispatcher.on_method(AddIngredients)
             def cook(self, affair: AddIngredients) -> dict[str, list[str]]:
                 return {"dish": ["eggs"]}
 
-        k = Kitchen()  # cook() is now registered as a bound method
+            @staticmethod
+            @dispatcher.on_method(AddIngredients)
+            def garnish(affair: AddIngredients) -> dict[str, str]:
+                return {"garnish": "parsley"}
+
+        k = Kitchen()  # cook() and garnish() are now registered
     """
 
     def _bind_affair_methods(self) -> None:
@@ -146,9 +155,13 @@ class AffairAware(metaclass=AffairAwareMeta):
             for name, attr in vars(klass).items():
                 if name in seen:
                     continue
-                if callable(attr) and hasattr(attr, "_affair_types"):
-                    unbound_to_bound[attr] = getattr(self, name)
-                    marked.append(attr)
+                # Unwrap staticmethod/classmethod to access inner function
+                inner = attr
+                if isinstance(attr, (staticmethod, classmethod)):
+                    inner = attr.__func__
+                if callable(inner) and hasattr(inner, "_affair_types"):
+                    unbound_to_bound[inner] = getattr(self, name)
+                    marked.append(inner)
                     seen.add(name)
 
         # Register each bound method, resolving after references

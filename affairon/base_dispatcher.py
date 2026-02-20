@@ -1,4 +1,3 @@
-import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
@@ -35,12 +34,11 @@ class BaseDispatcher[CB](ABC):
         *affair_types: type[A],
         after: list[Callable[[A], R]] | None = None,
     ) -> Callable[[Callable[[A], R]], Callable[[A], R]]:
-        """Decorator to register listener.
+        """Decorator to register a plain function as listener.
 
-        Uses dual TypeVar to preserve both the affair parameter type and
-        return type through the decorator, so type checkers see the
-        concrete types used in user code rather than the base
-        ``MutableAffair``.
+        Registers the callback immediately.  For class methods, use
+        :meth:`on_method` instead so the bound method is registered at
+        instantiation time via :class:`AffairAwareMeta`.
 
         Args:
             affair_types: MutableAffair types to listen for.
@@ -58,15 +56,40 @@ class BaseDispatcher[CB](ABC):
         """
 
         def decorator(func: Callable[[A], R]) -> Callable[[A], R]:
-            params = list(inspect.signature(func).parameters)
-            if params and params[0] == "self":
-                # Unbound method: defer registration to AffairAwareMeta.__call__
-                func._affair_types = list(affair_types)  # type: ignore[attr-defined]
-                func._affair_after = after  # type: ignore[attr-defined]
-                func._affair_dispatcher = self  # type: ignore[attr-defined]
-            else:
-                # Plain function: register immediately
-                self.register(list(affair_types), func, after=after)  # type: ignore[arg-type]
+            self.register(list(affair_types), func, after=after)  # type: ignore[arg-type]
+            return func
+
+        return decorator
+
+    def on_method[A: MutableAffair, F: Callable[..., Any]](
+        self,
+        *affair_types: type[A],
+        after: list[Any] | None = None,
+    ) -> Callable[[F], F]:
+        """Decorator to mark a class method for deferred registration.
+
+        Does **not** register the callback.  Instead it stamps metadata
+        on the unbound function so that :class:`AffairAwareMeta` can
+        register the *bound* method when the owning class is instantiated.
+
+        Must be used inside an :class:`AffairAware` subclass.
+
+        Args:
+            affair_types: MutableAffair types to listen for.
+            after: List of callbacks that must execute before this one.
+
+        Returns:
+            Decorator function that returns the original function unchanged.
+
+        Post:
+            ``_affair_types``, ``_affair_after``, ``_affair_dispatcher``
+            stamped on the function for later consumption by the metaclass.
+        """
+
+        def decorator(func: F) -> F:
+            func._affair_types = list(affair_types)  # type: ignore[attr-defined]
+            func._affair_after = after  # type: ignore[attr-defined]
+            func._affair_dispatcher = self  # type: ignore[attr-defined]
             return func
 
         return decorator

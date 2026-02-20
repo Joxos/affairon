@@ -21,7 +21,7 @@ class TestAffairAwareBasic:
             def __init__(self, tag: str):
                 self.tag = tag  # no super().__init__() needed
 
-            @d.on(Ping)
+            @d.on_method(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:
                 return {self.tag: affair.msg}
 
@@ -45,7 +45,7 @@ class TestAffairAwareBasic:
         assert d.emit(Ping(msg="x")) == {}
 
         class SkippedSuper(AffairAware):
-            @d.on(Ping)
+            @d.on_method(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:
                 return {"ok": affair.msg}
 
@@ -69,12 +69,12 @@ class TestAffairAwareAfterDeps:
         order: list[str] = []
 
         class Handler(AffairAware):
-            @d.on(Ping)
+            @d.on_method(Ping)
             def first(self, affair: Ping) -> dict[str, int]:
                 order.append("first")
                 return {"first": 1}
 
-            @d.on(Ping, after=[first])
+            @d.on_method(Ping, after=[first])
             def second(self, affair: Ping) -> dict[str, int]:
                 order.append("second")
                 return {"second": 2}
@@ -95,7 +95,7 @@ class TestAffairAwareAfterDeps:
             return {"plain": 1}
 
         class Handler(AffairAware):
-            @d.on(Ping, after=[plain])
+            @d.on_method(Ping, after=[plain])
             def method(self, affair: Ping) -> dict[str, int]:
                 order.append("method")
                 return {"method": 2}
@@ -117,12 +117,12 @@ class TestAffairAwareInheritance:
         d = Dispatcher()
 
         class Base(AffairAware):
-            @d.on(Ping)
+            @d.on_method(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:
                 return {"who": "base"}
 
         class Child(Base):
-            @d.on(Ping)
+            @d.on_method(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:
                 return {"who": "child"}
 
@@ -138,7 +138,7 @@ class TestAffairAwareInheritance:
             def __init__(self, name: str):
                 self.name = name  # no super().__init__() needed
 
-            @d.on(Ping)
+            @d.on_method(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:
                 return {self.name: affair.msg}
 
@@ -146,3 +146,72 @@ class TestAffairAwareInheritance:
         Handler("h2")
         result = d.emit(Ping(msg="hi"))
         assert result == {"h1": "hi", "h2": "hi"}
+
+
+# =============================================================================
+# staticmethod & classmethod support
+# =============================================================================
+
+
+class TestAffairAwareStaticAndClassMethod:
+    def test_staticmethod_registered_on_instantiation(self):
+        """@staticmethod + @on_method() registers the static function
+        at instantiation time."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @staticmethod
+            @d.on_method(Ping)
+            def handle(affair: Ping) -> dict[str, str]:
+                return {"static": affair.msg}
+
+        # Before instantiation — not registered
+        assert d.emit(Ping(msg="x")) == {}
+
+        Handler()
+        result = d.emit(Ping(msg="hello"))
+        assert result == {"static": "hello"}
+
+    def test_classmethod_registered_on_instantiation(self):
+        """@classmethod + @on_method() registers a bound class method
+        that receives cls at instantiation time."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @classmethod
+            @d.on_method(Ping)
+            def handle(cls, affair: Ping) -> dict[str, str]:
+                return {"cls": cls.__name__}
+
+        assert d.emit(Ping(msg="x")) == {}
+
+        Handler()
+        result = d.emit(Ping(msg="x"))
+        assert result == {"cls": "Handler"}
+
+    def test_mixed_instance_static_classmethod(self):
+        """Instance method, staticmethod, and classmethod all coexist
+        in a single AffairAware subclass."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            def __init__(self, tag: str):
+                self.tag = tag
+
+            @d.on_method(Ping)
+            def instance_handle(self, affair: Ping) -> dict[str, str]:
+                return {"instance": self.tag}
+
+            @staticmethod
+            @d.on_method(Ping)
+            def static_handle(affair: Ping) -> dict[str, str]:
+                return {"static": "yes"}
+
+            @classmethod
+            @d.on_method(Ping)
+            def class_handle(cls, affair: Ping) -> dict[str, str]:
+                return {"class": cls.__name__}
+
+        Handler("mytag")
+        result = d.emit(Ping(msg="x"))
+        assert result == {"instance": "mytag", "static": "yes", "class": "Handler"}

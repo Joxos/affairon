@@ -130,7 +130,9 @@ def main(affair: AffairMain) -> None:
 ## Class-Based Handlers — `AffairAware`
 
 For class-based callback organization, inherit from `AffairAware`.
-Decorated methods are automatically registered as bound callbacks when the class is instantiated — no `super().__init__()` call required:
+Use `on_method()` (instead of `on()`) for class methods — they are
+automatically registered as bound callbacks when the class is instantiated.
+No `super().__init__()` call required:
 
 ```python
 from affairon import AffairAware, Dispatcher
@@ -141,7 +143,7 @@ class Kitchen(AffairAware):
     def __init__(self, chef: str):
         self.chef = chef
 
-    @d.on(AddIngredients)
+    @d.on_method(AddIngredients)
     def cook(self, affair: AddIngredients) -> dict[str, str]:
         return {"chef": self.chef}
 
@@ -150,7 +152,23 @@ result = d.emit(AddIngredients(ingredients=("egg",)))
 # result == {"chef": "Alice"}
 ```
 
-The `AffairAwareMeta` metaclass handles registration after `__init__` completes, so subclasses work transparently without any boilerplate.
+- `on()` — registers a plain function immediately
+- `on_method()` — stamps metadata only; the `AffairAwareMeta` metaclass registers the bound method after `__init__` completes
+
+`@staticmethod` and `@classmethod` are supported — place them **outside** `@on_method()`:
+
+```python
+class Handler(AffairAware):
+    @staticmethod
+    @d.on_method(Ping)
+    def static_handle(affair: Ping) -> dict[str, str]:
+        return {"static": "yes"}
+
+    @classmethod
+    @d.on_method(Ping)
+    def class_handle(cls, affair: Ping) -> dict[str, str]:
+        return {"cls": cls.__name__}
+```
 
 ---
 

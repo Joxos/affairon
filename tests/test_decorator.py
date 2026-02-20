@@ -1,17 +1,17 @@
-"""Tests for on() decorator — method detection and metadata stamping."""
+"""Tests for on() and on_method() decorators."""
 
 from affairon import AffairAware, Dispatcher
 from conftest import Ping, Pong
 
 
 # =============================================================================
-# Method vs function detection
+# on() — plain function immediate registration
 # =============================================================================
 
 
-class TestDecoratorMethodDetection:
+class TestDecoratorOn:
     def test_plain_function_registered_immediately(self):
-        """Plain function (no 'self' param) is registered at decoration time."""
+        """Plain function is registered at decoration time via on()."""
         d = Dispatcher()
 
         @d.on(Ping)
@@ -22,13 +22,19 @@ class TestDecoratorMethodDetection:
         result = d.emit(Ping(msg="x"))
         assert result == {"ok": "x"}
 
+
+# =============================================================================
+# on_method() — deferred registration for class methods
+# =============================================================================
+
+
+class TestDecoratorOnMethod:
     def test_method_defers_registration(self):
-        """Method (first param 'self') defers — only metadata stamped,
-        registered only after instantiation."""
+        """on_method() only stamps metadata; registration happens at instantiation."""
         d = Dispatcher()
 
         class Handler(AffairAware):
-            @d.on(Ping)
+            @d.on_method(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:
                 return {"handled": affair.msg}
 
@@ -43,15 +49,8 @@ class TestDecoratorMethodDetection:
         Handler()
         assert d.emit(Ping(msg="x")) == {"handled": "x"}
 
-
-# =============================================================================
-# Metadata stamping
-# =============================================================================
-
-
-class TestDecoratorMetadataStamping:
     def test_metadata_stamping(self):
-        """Decorator stamps _affair_types, _affair_after, and
+        """on_method() stamps _affair_types, _affair_after, and
         _affair_dispatcher on the raw function object."""
         d = Dispatcher()
 
@@ -59,13 +58,13 @@ class TestDecoratorMetadataStamping:
         def dep(affair: Ping) -> None: ...
 
         class H(AffairAware):
-            @d.on(Ping, Pong)
+            @d.on_method(Ping, Pong)
             def multi(self, affair) -> None: ...
 
-            @d.on(Ping, after=[dep])
+            @d.on_method(Ping, after=[dep])
             def with_after(self, affair: Ping) -> None: ...
 
-            @d.on(Ping)
+            @d.on_method(Ping)
             def no_after(self, affair: Ping) -> None: ...
 
         # Multiple affair types

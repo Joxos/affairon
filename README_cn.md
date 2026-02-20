@@ -131,7 +131,7 @@ def main(affair: AffairMain) -> None:
 ## 类式处理器 — `AffairAware`
 
 如果希望以类的方式组织回调，可以继承 `AffairAware`。
-被装饰的方法会在类实例化时自动注册为绑定回调——无需调用 `super().__init__()`：
+类方法使用 `on_method()`（而非 `on()`）进行装饰——实例化时自动注册为绑定回调，无需调用 `super().__init__()`：
 
 ```python
 from affairon import AffairAware, Dispatcher
@@ -142,7 +142,7 @@ class Kitchen(AffairAware):
     def __init__(self, chef: str):
         self.chef = chef
 
-    @d.on(AddIngredients)
+    @d.on_method(AddIngredients)
     def cook(self, affair: AddIngredients) -> dict[str, str]:
         return {"chef": self.chef}
 
@@ -151,7 +151,23 @@ result = d.emit(AddIngredients(ingredients=("egg",)))
 # result == {"chef": "Alice"}
 ```
 
-`AffairAwareMeta` 元类会在 `__init__` 完成后自动执行注册，子类无需任何额外样板代码。
+- `on()` — 立即注册普通函数
+- `on_method()` — 仅标注元数据；`AffairAwareMeta` 元类在 `__init__` 完成后注册绑定方法
+
+支持 `@staticmethod` 和 `@classmethod`——放在 `@on_method()` **外层**：
+
+```python
+class Handler(AffairAware):
+    @staticmethod
+    @d.on_method(Ping)
+    def static_handle(affair: Ping) -> dict[str, str]:
+        return {"static": "yes"}
+
+    @classmethod
+    @d.on_method(Ping)
+    def class_handle(cls, affair: Ping) -> dict[str, str]:
+        return {"cls": cls.__name__}
+```
 
 ---
 
