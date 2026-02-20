@@ -16,10 +16,11 @@ class BaseRegistry[CB]:
     """Registry table for affair listeners.
 
     Manages listener registration, removal, and execution order resolution
-    with MRO expansion, priority layering, and topological sorting using NetworkX.
+    with priority layering and topological sorting using NetworkX.
 
     Each affair type has its own dependency graph for callback relationships.
-    _graphs maps affair types to their dependency graphs.
+    Only callbacks explicitly registered for a given affair type are included;
+    parent affair type callbacks are NOT inherited (no MRO expansion).
     """
 
     def __init__(self, guardian: CB) -> None:
