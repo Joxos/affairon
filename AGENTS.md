@@ -51,7 +51,7 @@ affairon/              # Main package
   async_dispatcher.py  # AsyncDispatcher (same-layer callbacks run concurrently)
   registry.py          # BaseRegistry — NetworkX dependency graph, exec_order()
   composer.py          # PluginComposer — entry point + local plugin loading
-  exceptions.py        # Exception hierarchy (all inherit AffairdError)
+  exceptions.py        # Exception hierarchy (all inherit AffairError)
   utils.py             # merge_dict helper
   fairun/              # CLI runner subpackage
     cli.py             # argparse entry point, composes plugins, emits AffairMain
@@ -151,7 +151,7 @@ Class docstrings describe purpose; include `Attributes:` section when fields are
 
 ### Error Handling
 
-- All custom exceptions inherit from `AffairdError` (base exception in `exceptions.py`)
+- All custom exceptions inherit from `AffairError` (base exception in `exceptions.py`)
 - Wrap external errors into framework-specific types (e.g., `ValidationError` -> `AffairValidationError`)
 - Use `raise X from exc` to chain exceptions
 - Specific exception subclasses for each error domain: `PluginNotFoundError`, `PluginVersionError`, etc.

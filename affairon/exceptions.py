@@ -1,10 +1,10 @@
 """Exception hierarchy for affairon.
 
-All custom exceptions inherit from AffairdError base class.
+All custom exceptions inherit from AffairError base class.
 """
 
 
-class AffairdError(Exception):
+class AffairError(Exception):
     """Base exception for all affairon errors.
 
     All custom exceptions in the affairon framework inherit from this class,
@@ -12,18 +12,16 @@ class AffairdError(Exception):
     """
 
 
-class AffairValidationError(AffairdError, ValueError):
+class AffairValidationError(AffairError, ValueError):
     """Affair validation failed.
 
-    Raised when:
-    - User-provided affair fields fail pydantic validation
-    - Reserved fields (affair_id, timestamp) are provided during construction
+    Raised when user-provided affair fields fail pydantic validation.
 
     This wraps pydantic.ValidationError to provide a framework-specific exception type.
     """
 
 
-class CyclicDependencyError(AffairdError, ValueError):
+class CyclicDependencyError(AffairError, ValueError):
     """Cyclic dependency detected in listener after chain.
 
     Raised when:
@@ -34,7 +32,7 @@ class CyclicDependencyError(AffairdError, ValueError):
     """
 
 
-class KeyConflictError(AffairdError, ValueError):
+class KeyConflictError(AffairError, ValueError):
     """Key conflict when merging listener return values.
 
     Raised when multiple listeners return dictionaries with overlapping keys.
@@ -46,7 +44,7 @@ class KeyConflictError(AffairdError, ValueError):
 # -- Plugin errors ------------------------------------------------------------
 
 
-class PluginError(AffairdError):
+class PluginError(AffairError):
     """Base exception for plugin loading errors."""
 
 

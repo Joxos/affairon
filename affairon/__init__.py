@@ -18,7 +18,7 @@ from affairon.affairs import (
 from affairon.async_dispatcher import AsyncDispatcher
 from affairon.dispatcher import Dispatcher
 from affairon.exceptions import (
-    AffairdError,
+    AffairError,
     AffairValidationError,
     CyclicDependencyError,
     KeyConflictError,
@@ -43,7 +43,7 @@ __all__ = [
     "AsyncDispatcher",
     "default_dispatcher",
     # Exception classes
-    "AffairdError",
+    "AffairError",
     "AffairValidationError",
     "CyclicDependencyError",
     "KeyConflictError",
