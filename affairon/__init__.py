@@ -8,7 +8,6 @@ __version__ = "0.1.0"
 
 from affairon.affairs import (
     Affair,
-    AffairAware,
     AffairDeadLetteredAffair,
     AffairMain,
     CallbackErrorAffair,
@@ -16,12 +15,18 @@ from affairon.affairs import (
     MutableAffair,
 )
 from affairon.async_dispatcher import AsyncDispatcher
+from affairon.aware import AffairAware
 from affairon.dispatcher import Dispatcher
 from affairon.exceptions import (
     AffairError,
     AffairValidationError,
     CyclicDependencyError,
     KeyConflictError,
+    PluginEntryPointError,
+    PluginError,
+    PluginImportError,
+    PluginNotFoundError,
+    PluginVersionError,
 )
 
 # Module-level default dispatcher instance
@@ -47,4 +52,9 @@ __all__ = [
     "AffairValidationError",
     "CyclicDependencyError",
     "KeyConflictError",
+    "PluginError",
+    "PluginNotFoundError",
+    "PluginVersionError",
+    "PluginEntryPointError",
+    "PluginImportError",
 ]

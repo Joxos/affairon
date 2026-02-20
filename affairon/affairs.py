@@ -1,7 +1,7 @@
-"""Affair model for affairon.
+"""Affair models for affairon.
 
-This module provides the Affair base class and MetaAffair framework for
-affair-driven architecture.
+Defines the affair type hierarchy: MutableAffair, Affair, MetaAffair,
+and framework meta-affairs (AffairMain, CallbackErrorAffair, etc.).
 """
 
 from pathlib import Path
@@ -98,76 +98,3 @@ class AffairMain(MetaAffair):
     """
 
     project_path: Path = Path(".").resolve()
-
-
-class AffairAwareMeta(type):
-    """Metaclass that registers ``@dispatcher.on_method()`` callbacks.
-
-    Overrides ``__call__`` so that ``_bind_affair_methods()`` runs
-    *after* ``__init__`` returns, regardless of whether the subclass
-    calls ``super().__init__()``.
-    """
-
-    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
-        instance = super().__call__(*args, **kwargs)
-        instance._bind_affair_methods()
-        return instance
-
-
-class AffairAware(metaclass=AffairAwareMeta):
-    """Mixin that auto-registers ``@dispatcher.on_method()`` decorated methods.
-
-    Methods decorated with ``@dispatcher.on_method()`` inside an
-    ``AffairAware`` subclass are not registered at class definition time.
-    Instead, the decorator stamps metadata on the unbound function, and
-    the ``AffairAwareMeta`` metaclass registers the *bound* methods
-    automatically after ``__init__`` completes.
-
-    Use ``on_method()`` (not ``on()``) for class methods.
-    No ``super().__init__()`` call is required.
-
-    ``@staticmethod`` and ``@classmethod`` are supported — place them
-    **outside** ``@on_method()``:
-
-    Example::
-
-        class Kitchen(AffairAware):
-            @dispatcher.on_method(AddIngredients)
-            def cook(self, affair: AddIngredients) -> dict[str, list[str]]:
-                return {"dish": ["eggs"]}
-
-            @staticmethod
-            @dispatcher.on_method(AddIngredients)
-            def garnish(affair: AddIngredients) -> dict[str, str]:
-                return {"garnish": "parsley"}
-
-        k = Kitchen()  # cook() and garnish() are now registered
-    """
-
-    def _bind_affair_methods(self) -> None:
-        """Scan for marked methods and register them as bound callbacks."""
-        # Collect marked methods across MRO, build unbound → bound mapping
-        unbound_to_bound: dict[Any, Any] = {}
-        marked: list[Any] = []
-
-        seen: set[str] = set()
-        for klass in type(self).__mro__:
-            for name, attr in vars(klass).items():
-                if name in seen:
-                    continue
-                # Unwrap staticmethod/classmethod to access inner function
-                inner = attr
-                if isinstance(attr, (staticmethod, classmethod)):
-                    inner = attr.__func__
-                if callable(inner) and hasattr(inner, "_affair_types"):
-                    unbound_to_bound[inner] = getattr(self, name)
-                    marked.append(inner)
-                    seen.add(name)
-
-        # Register each bound method, resolving after references
-        for func in marked:
-            bound = unbound_to_bound[func]
-            after = func._affair_after
-            if after:
-                after = [unbound_to_bound.get(cb, cb) for cb in after]
-            func._affair_dispatcher.register(func._affair_types, bound, after=after)

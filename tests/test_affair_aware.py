@@ -1,6 +1,5 @@
 """Tests for AffairAware mixin — class method auto-registration."""
 
-
 from conftest import Ping
 
 from affairon import AffairAware, Dispatcher

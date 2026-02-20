@@ -45,8 +45,9 @@ uv run ruff format .
 affairon/              # Main package
   __init__.py          # Public API, re-exports, default_dispatcher singleton
   _types.py            # PEP 695 type aliases (SyncCallback, AsyncCallback)
-  affairs.py           # Affair/MutableAffair (Pydantic), AffairAware metaclass
-  base_dispatcher.py   # Abstract BaseDispatcher with on()/on_method()/register()
+  affairs.py           # Affair/MutableAffair (Pydantic) data models
+  aware.py             # AffairAware mixin + AffairAwareMeta metaclass
+  base_dispatcher.py   # Abstract BaseDispatcher with on()/on_method()/register()/unregister()
   dispatcher.py        # Sync Dispatcher (emit executes layers sequentially)
   async_dispatcher.py  # AsyncDispatcher (same-layer callbacks run concurrently)
   registry.py          # BaseRegistry — NetworkX dependency graph, exec_order()
@@ -154,7 +155,7 @@ Class docstrings describe purpose; include `Attributes:` section when fields are
 - All custom exceptions inherit from `AffairError` (base exception in `exceptions.py`)
 - Wrap external errors into framework-specific types (e.g., `ValidationError` -> `AffairValidationError`)
 - Use `raise X from exc` to chain exceptions
-- Specific exception subclasses for each error domain: `PluginNotFoundError`, `PluginVersionError`, etc.
+- Specific exception subclasses for each error domain: `PluginNotFoundError`, `PluginVersionError`, `PluginImportError`, etc.
 - Never use bare `except:` — always catch specific types
 - Logging uses `loguru` with `logger.bind(source="...")` for module-scoped loggers
 

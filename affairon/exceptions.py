@@ -70,3 +70,12 @@ class PluginEntryPointError(PluginError):
     Raised when a plugin package is installed but does not declare
     an entry point in the 'affairon' entry point group.
     """
+
+
+class PluginImportError(PluginError):
+    """Plugin module failed to import.
+
+    Raised when a plugin's entry point module or a local plugin module
+    raises an exception during import. The original exception is chained
+    via ``__cause__``.
+    """

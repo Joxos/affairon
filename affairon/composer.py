@@ -18,6 +18,7 @@ Typical usage::
 
 import importlib
 import importlib.metadata
+import re
 import tomllib
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from packaging.version import Version
 
 from affairon.exceptions import (
     PluginEntryPointError,
+    PluginImportError,
     PluginNotFoundError,
     PluginVersionError,
 )
@@ -34,6 +36,22 @@ from affairon.exceptions import (
 composer_logger = logger.bind(source="affairon_plugin_composer")
 
 ENTRY_POINT_GROUP = "affairon.plugins"
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize a plugin name per PEP 503.
+
+    Replaces any run of hyphens, underscores, or periods with a single
+    hyphen and lower-cases the result, so that ``My_Plugin``,
+    ``my-plugin``, and ``my.plugin`` all map to ``my-plugin``.
+
+    Args:
+        name: Raw plugin or package name.
+
+    Returns:
+        Normalized name string.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 class PluginComposer:
@@ -108,7 +126,9 @@ class PluginComposer:
                 composer_logger.exception(
                     f"Failed to load local plugin '{module_path}': {exc}"
                 )
-                raise
+                raise PluginImportError(
+                    f"Failed to import local plugin '{module_path}'"
+                ) from exc
 
     def compose_from_pyproject(self, pyproject_path: Path) -> None:
         """Load plugins declared in a ``pyproject.toml`` file.
@@ -149,8 +169,9 @@ class PluginComposer:
             requirement: Parsed PEP 508 requirement.
         """
         plugin_name = requirement.name
+        normalized_name = _normalize_name(plugin_name)
 
-        if plugin_name in self.loaded_plugins:
+        if normalized_name in self.loaded_plugins:
             composer_logger.debug(f"Plugin already loaded: {plugin_name}")
             return
 
@@ -184,8 +205,10 @@ class PluginComposer:
         try:
             composer_logger.debug(f"Loading plugin '{plugin_name}' from {ep.value}")
             ep.load()
-            self.loaded_plugins.add(plugin_name)
+            self.loaded_plugins.add(normalized_name)
             composer_logger.info(f"Plugin '{plugin_name}' v{installed_version} loaded")
         except Exception as exc:
             composer_logger.exception(f"Failed to load plugin '{plugin_name}': {exc}")
-            raise
+            raise PluginImportError(
+                f"Failed to load plugin '{plugin_name}' from entry point"
+            ) from exc
