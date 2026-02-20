@@ -198,3 +198,27 @@ class BaseDispatcher[CB](ABC):
             RecursionError: If listeners form infinite recursion chain.
         """
         raise NotImplementedError
+
+    @staticmethod
+    def _resolve_affair_types(
+        affair: MutableAffair,
+    ) -> list[type[MutableAffair]]:
+        """Determine which affair types to dispatch for.
+
+        When ``affair.emit_up`` is False, returns only the concrete type.
+        When True, walks the MRO and returns all ``MutableAffair``
+        subclasses from child to parent.
+
+        Args:
+            affair: The affair instance being emitted.
+
+        Returns:
+            Ordered list of affair types (child-first) to dispatch.
+        """
+        if not affair.emit_up:
+            return [type(affair)]
+        return [
+            t
+            for t in type(affair).__mro__
+            if isinstance(t, type) and issubclass(t, MutableAffair)
+        ]

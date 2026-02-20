@@ -13,9 +13,17 @@ from affairon.exceptions import AffairValidationError
 
 
 class MutableAffair(BaseModel):
-    """Mutable version of Affair. Also serves as base class for Affair to wrap pydantic validation."""
+    """Mutable version of Affair. Also serves as base class for Affair to wrap pydantic validation.
+
+    Attributes:
+        emit_up: When True, emitting this affair also triggers callbacks
+            registered on parent affair types, walking the MRO from child
+            to parent.  Defaults to False (only the concrete type fires).
+    """
 
     model_config = ConfigDict(validate_assignment=True, extra="forbid", strict=True)
+
+    emit_up: bool = False
 
     def __init__(self, **data: Any) -> None:
         """Wrap pydantic ValidationError into AffairValidationError."""
