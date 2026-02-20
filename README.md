@@ -198,6 +198,9 @@ Affairon's long-term goal: reduce costs and risks via framework assistance (affa
 - **Conflicts**: key collisions raise `KeyConflictError`
 - **Dependency order**: `after` declares "must run before" callbacks
 - **Async concurrency**: same-layer callbacks run concurrently; failures may surface as `ExceptionGroup`
+- **Affair propagation (`emit_up`)**: `MutableAffair` has an `emit_up: bool = False` field.
+  When `True`, `emit()` walks the affair type's MRO (child-first) and also invokes callbacks
+  registered on parent affair types.  Cross-hierarchy key conflicts raise `KeyConflictError`.
 
 ---
 

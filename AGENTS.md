@@ -165,6 +165,10 @@ Class docstrings describe purpose; include `Attributes:` section when fields are
 - ABC for abstract base classes (e.g., `BaseDispatcher`)
 - Metaclass (`AffairAwareMeta`) for automatic callback registration
 - Generic classes with PEP 695 syntax (`class BaseDispatcher[CB](ABC):`)
+- `MutableAffair.emit_up` (`bool`, default `False`): when `True`, `emit()` walks the affair's MRO
+  (child-first) and also fires callbacks registered on parent affair types. The same instance is
+  passed to all callbacks (type-safe via Liskov substitution). Cross-hierarchy key conflicts raise
+  `KeyConflictError` by design.
 
 ## Testing Conventions
 
