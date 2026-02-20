@@ -29,10 +29,6 @@ build-backend = "hatchling.build"
 [project.scripts]
 fairun = "affairon.fairun.cli:main"
 
-[tool.ruff]
-line-length = 88
-target-version = "py312"
-
 [tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
@@ -43,20 +39,11 @@ select = [
     "UP",  # pyupgrade
     "B",   # flake8-bugbear
 ]
-ignore = []
 
 [tool.ruff.lint.isort]
 known-first-party = ["affairon"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
 asyncio_mode = "auto"
 
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.3.0",
-]
