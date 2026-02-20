@@ -19,8 +19,7 @@ class TestAffairAwareBasic:
 
         class Handler(AffairAware):
             def __init__(self, tag: str):
-                self.tag = tag
-                super().__init__()
+                self.tag = tag  # no super().__init__() needed
 
             @d.on(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:
@@ -35,8 +34,8 @@ class TestAffairAwareBasic:
         assert result == {"mytag": "hi"}
 
     def test_no_registration_edge_cases(self):
-        """Empty subclass and skipped super().__init__() both result in
-        no registered callbacks — no error raised."""
+        """Empty subclass is harmless no-op. Skipping super().__init__()
+        still registers callbacks thanks to the metaclass."""
         d = Dispatcher()
 
         class Empty(AffairAware):
@@ -48,13 +47,14 @@ class TestAffairAwareBasic:
         class SkippedSuper(AffairAware):
             @d.on(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:
-                return {"bad": affair.msg}
+                return {"ok": affair.msg}
 
             def __init__(self):
                 pass  # deliberately skip super().__init__()
 
         SkippedSuper()
-        assert d.emit(Ping(msg="x")) == {}
+        # Metaclass guarantees registration even without super().__init__()
+        assert d.emit(Ping(msg="x")) == {"ok": "x"}
 
 
 # =============================================================================
@@ -136,8 +136,7 @@ class TestAffairAwareInheritance:
 
         class Handler(AffairAware):
             def __init__(self, name: str):
-                self.name = name
-                super().__init__()
+                self.name = name  # no super().__init__() needed
 
             @d.on(Ping)
             def handle(self, affair: Ping) -> dict[str, str]:

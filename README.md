@@ -127,6 +127,33 @@ def main(affair: AffairMain) -> None:
 
 ---
 
+## Class-Based Handlers — `AffairAware`
+
+For class-based callback organization, inherit from `AffairAware`.
+Decorated methods are automatically registered as bound callbacks when the class is instantiated — no `super().__init__()` call required:
+
+```python
+from affairon import AffairAware, Dispatcher
+
+d = Dispatcher()
+
+class Kitchen(AffairAware):
+    def __init__(self, chef: str):
+        self.chef = chef
+
+    @d.on(AddIngredients)
+    def cook(self, affair: AddIngredients) -> dict[str, str]:
+        return {"chef": self.chef}
+
+k = Kitchen("Alice")  # cook() is now a registered bound method
+result = d.emit(AddIngredients(ingredients=("egg",)))
+# result == {"chef": "Alice"}
+```
+
+The `AffairAwareMeta` metaclass handles registration after `__init__` completes, so subclasses work transparently without any boilerplate.
+
+---
+
 ## Design Tradeoffs
 
 This paradigm is not "universal," but its gains and costs are both clear:

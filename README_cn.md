@@ -128,6 +128,33 @@ def main(affair: AffairMain) -> None:
 
 ---
 
+## 类式处理器 — `AffairAware`
+
+如果希望以类的方式组织回调，可以继承 `AffairAware`。
+被装饰的方法会在类实例化时自动注册为绑定回调——无需调用 `super().__init__()`：
+
+```python
+from affairon import AffairAware, Dispatcher
+
+d = Dispatcher()
+
+class Kitchen(AffairAware):
+    def __init__(self, chef: str):
+        self.chef = chef
+
+    @d.on(AddIngredients)
+    def cook(self, affair: AddIngredients) -> dict[str, str]:
+        return {"chef": self.chef}
+
+k = Kitchen("Alice")  # cook() 已注册为绑定方法
+result = d.emit(AddIngredients(ingredients=("egg",)))
+# result == {"chef": "Alice"}
+```
+
+`AffairAwareMeta` 元类会在 `__init__` 完成后自动执行注册，子类无需任何额外样板代码。
+
+---
+
 ## 设计权衡
 
 此范式并非"万能"，但它的收益明确、成本也明确：

@@ -60,7 +60,7 @@ class BaseDispatcher[CB](ABC):
         def decorator(func: Callable[[A], R]) -> Callable[[A], R]:
             params = list(inspect.signature(func).parameters)
             if params and params[0] == "self":
-                # Unbound method: defer registration to AffairAware.__init__
+                # Unbound method: defer registration to AffairAwareMeta.__call__
                 func._affair_types = list(affair_types)  # type: ignore[attr-defined]
                 func._affair_after = after  # type: ignore[attr-defined]
                 func._affair_dispatcher = self  # type: ignore[attr-defined]

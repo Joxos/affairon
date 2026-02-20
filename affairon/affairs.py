@@ -100,16 +100,30 @@ class AffairMain(MetaAffair):
     project_path: Path = Path(".").resolve()
 
 
-class AffairAware:
+class AffairAwareMeta(type):
+    """Metaclass that guarantees ``@dispatcher.on()`` method registration.
+
+    Overrides ``__call__`` so that ``_bind_affair_methods()`` runs
+    *after* ``__init__`` returns, regardless of whether the subclass
+    calls ``super().__init__()``.
+    """
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        instance = super().__call__(*args, **kwargs)
+        instance._bind_affair_methods()
+        return instance
+
+
+class AffairAware(metaclass=AffairAwareMeta):
     """Mixin that auto-registers ``@dispatcher.on()`` decorated methods.
 
     Methods decorated with ``@dispatcher.on()`` inside an ``AffairAware``
     subclass are not registered at class definition time.  Instead, the
-    decorator stamps metadata on the unbound function, and
-    ``AffairAware.__init__`` registers the *bound* methods when the
-    instance is created.
+    decorator stamps metadata on the unbound function, and the
+    ``AffairAwareMeta`` metaclass registers the *bound* methods
+    automatically after ``__init__`` completes.
 
-    Subclasses that override ``__init__`` must call ``super().__init__()``.
+    No ``super().__init__()`` call is required.
 
     Example::
 
@@ -120,10 +134,6 @@ class AffairAware:
 
         k = Kitchen()  # cook() is now registered as a bound method
     """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._bind_affair_methods()
 
     def _bind_affair_methods(self) -> None:
         """Scan for marked methods and register them as bound callbacks."""
