@@ -27,6 +27,10 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
     def emit(self, affair: MutableAffair) -> dict[str, Any]:
         """Synchronously dispatch affair.
 
+        When ``affair.emit_up`` is True, callbacks registered on parent
+        affair types are also invoked, walking the MRO from child to
+        parent.
+
         Warning:
             Listeners can recursively call emit(). Framework does not detect cycles.
             Users must avoid infinite recursion chains (e.g., A→B→A), otherwise
@@ -46,11 +50,12 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
             KeyConflictError: If merging dicts causes key conflict.
             RecursionError: If listeners form infinite recursion chain.
         """
-        layers = self._registry.exec_order(type(affair))
         merged_result: dict[str, Any] = {}
-        for layer in layers:
-            for cb in layer:
-                result = cb(affair)
-                if result is not None:
-                    merge_dict(merged_result, result)
+        for affair_type in self._resolve_affair_types(affair):
+            layers = self._registry.exec_order(affair_type)
+            for layer in layers:
+                for cb in layer:
+                    result = cb(affair)
+                    if result is not None:
+                        merge_dict(merged_result, result)
         return merged_result
