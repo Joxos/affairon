@@ -25,6 +25,10 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
     async def emit(self, affair: MutableAffair) -> dict[str, Any]:
         """Asynchronously dispatch affair.
 
+        When ``affair.emit_up`` is True, callbacks registered on parent
+        affair types are also invoked, walking the MRO from child to
+        parent.
+
         Warning:
             Listeners can recursively call emit(). Framework does not detect cycles.
             Users must avoid infinite recursion chains (e.g., A→B→A), otherwise
@@ -46,15 +50,16 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
             RecursionError: If listeners form infinite recursion chain.
             ExceptionGroup: If multiple listeners fail simultaneously.
         """
-        layers = self._registry.exec_order(type(affair))
         merged_result: dict[str, Any] = {}
-        for layer in layers:
-            tasks: list[asyncio.Task[dict[str, Any] | None]] = []
-            async with asyncio.TaskGroup() as group:
-                for callback in layer:
-                    tasks.append(group.create_task(callback(affair)))
-            for task in tasks:
-                result = task.result()
-                if result is not None:
-                    merge_dict(merged_result, result)
+        for affair_type in self._resolve_affair_types(affair):
+            layers = self._registry.exec_order(affair_type)
+            for layer in layers:
+                tasks: list[asyncio.Task[dict[str, Any] | None]] = []
+                async with asyncio.TaskGroup() as group:
+                    for callback in layer:
+                        tasks.append(group.create_task(callback(affair)))
+                for task in tasks:
+                    result = task.result()
+                    if result is not None:
+                        merge_dict(merged_result, result)
         return merged_result
