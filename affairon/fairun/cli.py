@@ -5,12 +5,13 @@ Parses the project path from command-line arguments, discovers
 """
 
 import argparse
+import asyncio
 import sys
 from pathlib import Path
 
 from loguru import logger
 
-from affairon import AffairMain, default_dispatcher
+from affairon import AffairMain, default_async_dispatcher, default_dispatcher
 from affairon.composer import PluginComposer
 
 log = logger.bind(source=__name__)
@@ -29,6 +30,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=Path("."),
         help="Path to the project directory containing pyproject.toml "
         "(defaults to current directory).",
+    )
+    parser.add_argument(
+        "--async",
+        dest="use_async",
+        action="store_true",
+        default=False,
+        help="Use the async dispatcher to emit AffairMain.",
     )
     return parser
 
@@ -57,7 +65,11 @@ def main(argv: list[str] | None = None) -> None:
     composer = PluginComposer()
     composer.compose_from_pyproject(pyproject_path)
 
-    log.info("Starting application from {}", project_path)
+    affair = AffairMain(project_path=project_path)
 
-    # Emit AffairMain to kick off the application
-    default_dispatcher.emit(AffairMain(project_path=project_path))
+    if args.use_async:
+        log.info("Starting application (async) from {}", project_path)
+        asyncio.run(default_async_dispatcher.emit(affair))
+    else:
+        log.info("Starting application from {}", project_path)
+        default_dispatcher.emit(affair)

@@ -36,8 +36,9 @@ from affairon.exceptions import (
     PluginVersionError,
 )
 
-# Module-level default dispatcher instance
+# Module-level default dispatcher singletons
 default_dispatcher = Dispatcher()
+default_async_dispatcher = AsyncDispatcher()
 
 __all__ = [
     # Version
@@ -54,6 +55,7 @@ __all__ = [
     "Dispatcher",
     "AsyncDispatcher",
     "default_dispatcher",
+    "default_async_dispatcher",
     # Exception classes
     "AffairError",
     "AffairValidationError",

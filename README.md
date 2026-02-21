@@ -53,6 +53,18 @@ class PrepCondiments(MutableAffair):
 
 ### Register Callbacks
 
+Affairon provides two global dispatcher singletons: `default_dispatcher` (sync)
+and `default_async_dispatcher` (async). We recommend importing with an alias
+for brevity:
+
+```python
+# Sync
+from affairon import default_dispatcher as dispatcher
+
+# Async
+from affairon import default_async_dispatcher as dispatcher
+```
+
 ```python
 from affairon import default_dispatcher as dispatcher
 
@@ -113,6 +125,12 @@ local_plugins = ["myapp.lib", "myapp.host"]
 fairun /path/to/project
 # or, from the project directory:
 fairun
+```
+
+Use `--async` to emit via the async dispatcher instead:
+
+```bash
+fairun --async /path/to/project
 ```
 
 Applications define their entry point by listening on `AffairMain`:
