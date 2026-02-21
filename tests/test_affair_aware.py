@@ -213,3 +213,96 @@ class TestAffairAwareStaticAndClassMethod:
         Handler("mytag")
         result = d.emit(Ping(msg="x"))
         assert result == {"instance": "mytag", "static": "yes", "class": "Handler"}
+
+
+# =============================================================================
+# Context manager (scoped callback lifetime)
+# =============================================================================
+
+
+class TestAffairAwareContextManager:
+    def test_callbacks_unregistered_on_exit(self):
+        """Callbacks are active inside `with` block and removed on exit."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @d.on_method(Ping)
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"ctx": affair.msg}
+
+        with Handler():
+            assert d.emit(Ping(msg="hi")) == {"ctx": "hi"}
+
+        assert d.emit(Ping(msg="hi")) == {}
+
+    def test_multiple_methods_all_unregistered(self):
+        """All methods of a single instance are unregistered on exit."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @d.on_method(Ping)
+            def first(self, affair: Ping) -> dict[str, str]:
+                return {"a": "1"}
+
+            @d.on_method(Ping)
+            def second(self, affair: Ping) -> dict[str, str]:
+                return {"b": "2"}
+
+        with Handler():
+            assert d.emit(Ping(msg="x")) == {"a": "1", "b": "2"}
+
+        assert d.emit(Ping(msg="x")) == {}
+
+    def test_other_registrations_survive(self):
+        """Context manager only unregisters callbacks from that instance."""
+        d = Dispatcher()
+
+        @d.on(Ping)
+        def permanent(affair: Ping) -> dict[str, str]:
+            return {"permanent": "yes"}
+
+        class Handler(AffairAware):
+            @d.on_method(Ping)
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"temp": "yes"}
+
+        with Handler():
+            result = d.emit(Ping(msg="x"))
+            assert result == {"permanent": "yes", "temp": "yes"}
+
+        assert d.emit(Ping(msg="x")) == {"permanent": "yes"}
+
+    def test_enter_returns_instance(self):
+        """__enter__ returns the instance itself for `as` binding."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            def __init__(self, tag: str):
+                self.tag = tag
+
+            @d.on_method(Ping)
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"tag": self.tag}
+
+        with Handler("hello") as h:
+            assert isinstance(h, Handler)
+            assert h.tag == "hello"
+            assert d.emit(Ping(msg="x")) == {"tag": "hello"}
+
+    def test_exit_on_exception(self):
+        """Callbacks are still unregistered when the block raises."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @d.on_method(Ping)
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"ok": "yes"}
+
+        try:
+            with Handler():
+                assert d.emit(Ping(msg="x")) == {"ok": "yes"}
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+
+        assert d.emit(Ping(msg="x")) == {}
