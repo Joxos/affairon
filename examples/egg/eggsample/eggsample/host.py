@@ -22,7 +22,6 @@ from affairon import AffairMain, Dispatcher
 from affairon import default_dispatcher as dispatcher
 from eggsample.affairs import AddIngredients, PrepCondiments
 
-
 condiments_tray = {
     "pickled walnuts": 13,
     "steak sauce": 4,
@@ -62,8 +61,9 @@ class EggsellentCook:
         random.shuffle(self.ingredients)
 
     def serve_the_food(self) -> None:
-        # In pluggy it pass the reference to the hookimpl and allows in-place mutation.
-        # However, affairon uses pydantic models which doesn't support references after v2.
+        # In pluggy it pass the reference to the hookimpl and
+        # allows in-place mutation. However, affairon uses pydantic
+        # models which doesn't support references after v2.
         # So it is necessary to change condiments_tray globally here.
         global condiments_tray
         affair = PrepCondiments(condiments=condiments_tray)
@@ -73,6 +73,7 @@ class EggsellentCook:
         print(f"Some condiments? We have {', '.join(condiments_tray.keys())}")
         if condiment_comments:
             print("\n".join(condiment_comments))
+
 
 if __name__ == "__main__":
     dispatcher.emit(AffairMain())

@@ -186,7 +186,8 @@ class BaseRegistry[CB]:
             affair_type: MutableAffair type to resolve.
 
         Returns:
-            2D list of callbacks in layers of execution order (dependencies before dependents).
+            2D list of callbacks in layers of execution order
+            (dependencies before dependents).
         """
         # Get the graph for the affair type
         if affair_type not in self._graphs:

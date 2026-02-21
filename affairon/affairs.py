@@ -13,7 +13,9 @@ from affairon.exceptions import AffairValidationError
 
 
 class MutableAffair(BaseModel):
-    """Mutable version of Affair. Also serves as base class for Affair to wrap pydantic validation.
+    """Mutable version of Affair.
+
+    Also serves as base class for Affair to wrap pydantic validation.
 
     Attributes:
         emit_up: When True, emitting this affair also triggers callbacks
