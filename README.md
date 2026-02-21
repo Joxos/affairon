@@ -204,6 +204,41 @@ Affairon's long-term goal: reduce costs and risks via framework assistance (affa
 
 ---
 
+## Logging
+
+Affairon uses [loguru](https://github.com/Delgan/loguru) internally.
+**All logging is disabled by default** — no output will appear unless
+you explicitly enable it:
+
+```python
+from loguru import logger
+
+# Enable affairon logs (sent to loguru's default stderr sink)
+logger.enable("affairon")
+```
+
+To disable again:
+
+```python
+logger.disable("affairon")
+```
+
+Because affairon delegates to loguru, you control the output format,
+level filtering, and sinks entirely through loguru's configuration:
+
+```python
+import sys
+from loguru import logger
+
+# Remove default sink, add your own
+logger.remove()
+logger.add(sys.stderr, level="DEBUG", filter="affairon")
+
+logger.enable("affairon")
+```
+
+---
+
 ## Project Vision
 
 If you align with this paradigm, contributions and discussions are welcome.

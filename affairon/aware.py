@@ -8,6 +8,10 @@ decorated class methods as affair callbacks.
 from types import TracebackType
 from typing import Any
 
+from loguru import logger
+
+log = logger.bind(source=__name__)
+
 
 class AffairAwareMeta(type):
     """Metaclass that registers ``@dispatcher.on_method()`` callbacks.
@@ -96,6 +100,13 @@ class AffairAware(metaclass=AffairAwareMeta):
             func._affair_dispatcher.register(func._affair_types, bound, after=after)
             self._affair_registrations.append(
                 (func._affair_dispatcher, func._affair_types, bound)
+            )
+
+        if marked:
+            log.debug(
+                "Bound {} affair method(s) on {}",
+                len(marked),
+                type(self).__qualname__,
             )
 
     def __enter__(self) -> "AffairAware":

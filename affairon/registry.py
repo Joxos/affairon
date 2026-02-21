@@ -7,9 +7,13 @@ with topological sorting and execution plan layering using NetworkX.
 from collections import defaultdict
 
 import networkx as nx
+from loguru import logger
 
 from affairon.affairs import MutableAffair
 from affairon.exceptions import CyclicDependencyError
+from affairon.utils import callable_name
+
+log = logger.bind(source=__name__)
 
 
 class BaseRegistry[CB]:
@@ -90,6 +94,12 @@ class BaseRegistry[CB]:
                     f" - cycles: {cycles}"
                 )
 
+            log.debug(
+                "Registered {} on {}",
+                callable_name(callback),
+                affair_type.__qualname__,
+            )
+
     def remove(
         self,
         affair_types: list[type[MutableAffair]] | None,
@@ -130,12 +140,21 @@ class BaseRegistry[CB]:
                 if callback is not None:
                     if callback in graph:
                         graph.remove_node(callback)
+                        log.debug(
+                            "Unregistered {} from {}",
+                            callable_name(callback),
+                            affair_type.__qualname__,
+                        )
                         # Clean up empty graph
                         if len(graph) == 0:
                             del self._graphs[affair_type]
                 else:
                     # If no func requested, delete the affair key
                     del self._graphs[affair_type]
+                    log.debug(
+                        "Unregistered all listeners from {}",
+                        affair_type.__qualname__,
+                    )
 
         # If specific func requested and affair not requested
         elif callback is not None:
@@ -144,6 +163,11 @@ class BaseRegistry[CB]:
             for affair_type, graph in self._graphs.items():
                 if callback in graph:
                     graph.remove_node(callback)
+                    log.debug(
+                        "Unregistered {} from {}",
+                        callable_name(callback),
+                        affair_type.__qualname__,
+                    )
                     # Mark for cleanup if empty
                     if len(graph) == 0:
                         affairs_to_clean.append(affair_type)

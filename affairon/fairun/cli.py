@@ -10,11 +10,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from affairon import default_dispatcher
-from affairon.affairs import AffairMain
+from affairon import AffairMain, default_dispatcher
 from affairon.composer import PluginComposer
 
-fairun_logger = logger.bind(source="fairun")
+log = logger.bind(source=__name__)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -46,19 +45,19 @@ def main(argv: list[str] | None = None) -> None:
     project_path: Path = args.project_path.resolve()
 
     if not project_path.is_dir():
-        fairun_logger.error(f"Not a directory: {project_path}")
+        log.error("Not a directory: {}", project_path)
         sys.exit(1)
 
     pyproject_path = project_path / "pyproject.toml"
     if not pyproject_path.is_file():
-        fairun_logger.error(f"No pyproject.toml found in {project_path}")
+        log.error("No pyproject.toml found in {}", project_path)
         sys.exit(1)
 
     # Compose plugins from pyproject.toml
     composer = PluginComposer()
     composer.compose_from_pyproject(pyproject_path)
 
-    fairun_logger.info(f"Starting application from {project_path}")
+    log.info("Starting application from {}", project_path)
 
     # Emit AffairMain to kick off the application
     default_dispatcher.emit(AffairMain(project_path=project_path))

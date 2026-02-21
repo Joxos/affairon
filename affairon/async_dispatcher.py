@@ -1,10 +1,14 @@
 import asyncio
 from typing import Any
 
+from loguru import logger
+
 from affairon._types import AsyncCallback
 from affairon.affairs import MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
 from affairon.utils import merge_dict
+
+log = logger.bind(source=__name__)
 
 
 class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
@@ -51,7 +55,13 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
             ExceptionGroup: If multiple listeners fail simultaneously.
         """
         merged_result: dict[str, Any] = {}
-        for affair_type in self._resolve_affair_types(affair):
+        affair_types = self._resolve_affair_types(affair)
+        log.debug(
+            "Emit {} (types={})",
+            type(affair).__qualname__,
+            [t.__qualname__ for t in affair_types],
+        )
+        for affair_type in affair_types:
             layers = self._registry.exec_order(affair_type)
             for layer in layers:
                 tasks: list[asyncio.Task[dict[str, Any] | None]] = []

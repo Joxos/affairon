@@ -6,6 +6,13 @@ and asynchronous dispatch modes.
 
 __version__ = "0.1.0"
 
+from loguru import logger
+
+# Disable all affairon logging by default.  Users opt in with:
+#     from loguru import logger
+#     logger.enable("affairon")
+logger.disable("affairon")
+
 from affairon.affairs import (
     Affair,
     AffairDeadLetteredAffair,

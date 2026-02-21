@@ -33,7 +33,7 @@ from affairon.exceptions import (
     PluginVersionError,
 )
 
-composer_logger = logger.bind(source="affairon_plugin_composer")
+log = logger.bind(source=__name__)
 
 ENTRY_POINT_GROUP = "affairon.plugins"
 
@@ -114,18 +114,16 @@ class PluginComposer:
         """
         for module_path in module_paths:
             if module_path in self.loaded_local_plugins:
-                composer_logger.debug(f"Local plugin already loaded: {module_path}")
+                log.debug("Local plugin already loaded: {}", module_path)
                 continue
 
             try:
-                composer_logger.debug(f"Loading local plugin '{module_path}'")
+                log.debug("Loading local plugin '{}'", module_path)
                 importlib.import_module(module_path)
                 self.loaded_local_plugins.add(module_path)
-                composer_logger.info(f"Local plugin '{module_path}' loaded")
+                log.info("Local plugin '{}' loaded", module_path)
             except Exception as exc:
-                composer_logger.exception(
-                    f"Failed to load local plugin '{module_path}': {exc}"
-                )
+                log.exception("Failed to load local plugin '{}'", module_path)
                 raise PluginImportError(
                     f"Failed to import local plugin '{module_path}'"
                 ) from exc
@@ -149,7 +147,7 @@ class PluginComposer:
         local_plugins: list[str] = affairon_config.get("local_plugins", [])
 
         if not plugin_reqs and not local_plugins:
-            composer_logger.info(f"No plugins declared in {pyproject_path}")
+            log.info("No plugins declared in {}", pyproject_path)
             return
 
         # External plugins first
@@ -172,7 +170,7 @@ class PluginComposer:
         normalized_name = _normalize_name(plugin_name)
 
         if normalized_name in self.loaded_plugins:
-            composer_logger.debug(f"Plugin already loaded: {plugin_name}")
+            log.debug("Plugin already loaded: {}", plugin_name)
             return
 
         # 1. Check installation
@@ -203,12 +201,12 @@ class PluginComposer:
 
         # 4. Import the entry point module (triggers decorator registration)
         try:
-            composer_logger.debug(f"Loading plugin '{plugin_name}' from {ep.value}")
+            log.debug("Loading plugin '{}' from {}", plugin_name, ep.value)
             ep.load()
             self.loaded_plugins.add(normalized_name)
-            composer_logger.info(f"Plugin '{plugin_name}' v{installed_version} loaded")
+            log.info("Plugin '{}' v{} loaded", plugin_name, installed_version)
         except Exception as exc:
-            composer_logger.exception(f"Failed to load plugin '{plugin_name}': {exc}")
+            log.exception("Failed to load plugin '{}'", plugin_name)
             raise PluginImportError(
                 f"Failed to load plugin '{plugin_name}' from entry point"
             ) from exc

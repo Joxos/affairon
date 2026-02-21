@@ -157,7 +157,20 @@ Class docstrings describe purpose; include `Attributes:` section when fields are
 - Use `raise X from exc` to chain exceptions
 - Specific exception subclasses for each error domain: `PluginNotFoundError`, `PluginVersionError`, `PluginImportError`, etc.
 - Never use bare `except:` — always catch specific types
-- Logging uses `loguru` with `logger.bind(source="...")` for module-scoped loggers
+- Logging uses `loguru`.  Every module creates a bound logger at module
+  scope: `log = logger.bind(source=__name__)`.  All affairon logging is
+  disabled by default via `logger.disable("affairon")` in `__init__.py`;
+  users opt in with `logger.enable("affairon")`.
+- Use loguru's native `{}` placeholder formatting (not f-strings) so that
+  string construction is deferred until the log is actually emitted.
+- Use `callable_name()` from `utils.py` instead of `callback.__qualname__`
+  in log arguments to avoid `AttributeError` on exotic callables.
+- Log levels reflect the event faithfully: DEBUG for routine operations
+  (emit, registration, binding), INFO for milestones (plugin loaded, app
+  started), ERROR/`.exception()` for real failures.  Do not duplicate
+  exception text in `.exception()` messages — the traceback is attached
+  automatically.
+- Avoid trace-level or per-callback-invocation logs.
 
 ### Class Patterns
 
