@@ -3,7 +3,6 @@ from collections.abc import Callable
 from typing import Any
 
 from affairon.affairs import MutableAffair
-from affairon.aware import AffairAware
 from affairon.registry import BaseRegistry
 
 
@@ -123,21 +122,21 @@ class BaseDispatcher[CB](ABC):
     def unregister(
         self,
         *affair_types: type[MutableAffair],
-        callback: CB | AffairAware | None = None,
+        callback: CB | None = None,
     ) -> None:
         """Unregister listeners.
 
-        Supports four modes:
+        Supports three modes:
         - (*affair_types, callback=cb): Remove callback from specified types.
         - (*affair_types): Remove all listeners from specified types.
         - (callback=cb): Remove callback from all affair types.
-        - (callback=instance): Remove all callbacks registered by an
-          ``AffairAware`` instance on this dispatcher. If affair_types
-          are given, only those types are affected.
+
+        For ``AffairAware`` instances, use ``instance.unregister()``
+        or the context manager protocol instead.
 
         Args:
             *affair_types: MutableAffair types to remove from (variadic).
-            callback: Callback, AffairAware instance, or None for all.
+            callback: Callback function, or None for all.
 
         Post:
             Matching listeners removed.
@@ -148,36 +147,8 @@ class BaseDispatcher[CB](ABC):
         if not affair_types and callback is None:
             raise ValueError("must provide affair_types or callback")
 
-        # Instance-based unregistration: remove all callbacks belonging
-        # to the AffairAware instance on this dispatcher.
-        if isinstance(callback, AffairAware):
-            self._unregister_instance(callback, affair_types or None)
-            return
-
         normalized_types = list(affair_types) if affair_types else None
         self._registry.remove(normalized_types, callback)
-
-    def _unregister_instance(
-        self,
-        instance: AffairAware,
-        affair_types: tuple[type[MutableAffair], ...] | None = None,
-    ) -> None:
-        """Remove all callbacks registered by an AffairAware instance.
-
-        Args:
-            instance: AffairAware instance whose callbacks to remove.
-            affair_types: If given, only remove from these affair types.
-        """
-        filter_types = set(affair_types) if affair_types else None
-        for reg_disp, reg_types, reg_cb in instance._affair_registrations:
-            if reg_disp is not self:
-                continue
-            if filter_types is not None:
-                types_to_remove = [t for t in reg_types if t in filter_types]
-            else:
-                types_to_remove = reg_types
-            if types_to_remove:
-                self._registry.remove(types_to_remove, reg_cb)
 
     @abstractmethod
     def emit(self, affair: MutableAffair) -> Any:

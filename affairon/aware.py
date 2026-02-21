@@ -45,8 +45,7 @@ class AffairAware(metaclass=AffairAwareMeta):
             result = dispatcher.emit(Ping(msg="hi"))
         # callbacks automatically unregistered here
 
-    For manual cleanup, pass the instance to
-    ``dispatcher.unregister(callback=instance)``.
+    For manual cleanup, call ``instance.unregister()``.
 
     ``@staticmethod`` and ``@classmethod`` are supported — place them
     **outside** ``@on_method()``:
@@ -109,6 +108,19 @@ class AffairAware(metaclass=AffairAwareMeta):
                 type(self).__qualname__,
             )
 
+    def unregister(self) -> None:
+        """Unregister all callbacks bound by this instance.
+
+        After calling, no callbacks registered by this instance will
+        fire on future emits.  Safe to call multiple times.
+        """
+        for dispatcher, affair_types, callback in self._affair_registrations:
+            try:
+                dispatcher.unregister(*affair_types, callback=callback)
+            except Exception:
+                pass
+        self._affair_registrations.clear()
+
     def __enter__(self) -> "AffairAware":
         return self
 
@@ -119,9 +131,4 @@ class AffairAware(metaclass=AffairAwareMeta):
         exc_tb: TracebackType | None,
     ) -> None:
         """Unregister all callbacks registered by this instance."""
-        for dispatcher, affair_types, callback in self._affair_registrations:
-            try:
-                dispatcher.unregister(*affair_types, callback=callback)
-            except Exception:
-                pass
-        self._affair_registrations.clear()
+        self.unregister()

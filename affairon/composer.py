@@ -18,7 +18,6 @@ Typical usage::
 
 import importlib
 import importlib.metadata
-import re
 import tomllib
 from pathlib import Path
 
@@ -32,26 +31,11 @@ from affairon.exceptions import (
     PluginNotFoundError,
     PluginVersionError,
 )
+from affairon.utils import normalize_name
 
 log = logger.bind(source=__name__)
 
 ENTRY_POINT_GROUP = "affairon.plugins"
-
-
-def _normalize_name(name: str) -> str:
-    """Normalize a plugin name per PEP 503.
-
-    Replaces any run of hyphens, underscores, or periods with a single
-    hyphen and lower-cases the result, so that ``My_Plugin``,
-    ``my-plugin``, and ``my.plugin`` all map to ``my-plugin``.
-
-    Args:
-        name: Raw plugin or package name.
-
-    Returns:
-        Normalized name string.
-    """
-    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 class PluginComposer:
@@ -167,7 +151,7 @@ class PluginComposer:
             requirement: Parsed PEP 508 requirement.
         """
         plugin_name = requirement.name
-        normalized_name = _normalize_name(plugin_name)
+        normalized_name = normalize_name(plugin_name)
 
         if normalized_name in self.loaded_plugins:
             log.debug("Plugin already loaded: {}", plugin_name)

@@ -216,6 +216,61 @@ class TestAffairAwareStaticAndClassMethod:
 
 
 # =============================================================================
+# Explicit unregister()
+# =============================================================================
+
+
+class TestAffairAwareUnregister:
+    def test_unregister_removes_all_callbacks(self):
+        """instance.unregister() removes all callbacks registered by it."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @d.on_method(Ping)
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"h": affair.msg}
+
+        h = Handler()
+        assert d.emit(Ping(msg="x")) == {"h": "x"}
+
+        h.unregister()
+        assert d.emit(Ping(msg="x")) == {}
+
+    def test_unregister_idempotent(self):
+        """Calling unregister() multiple times is safe."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @d.on_method(Ping)
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"ok": "yes"}
+
+        h = Handler()
+        h.unregister()
+        h.unregister()  # second call is a no-op
+        assert d.emit(Ping(msg="x")) == {}
+
+    def test_unregister_preserves_other_registrations(self):
+        """unregister() only affects callbacks from this instance."""
+        d = Dispatcher()
+
+        @d.on(Ping)
+        def permanent(affair: Ping) -> dict[str, str]:
+            return {"permanent": "yes"}
+
+        class Handler(AffairAware):
+            @d.on_method(Ping)
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"temp": "yes"}
+
+        h = Handler()
+        assert d.emit(Ping(msg="x")) == {"permanent": "yes", "temp": "yes"}
+
+        h.unregister()
+        assert d.emit(Ping(msg="x")) == {"permanent": "yes"}
+
+
+# =============================================================================
 # Context manager (scoped callback lifetime)
 # =============================================================================
 

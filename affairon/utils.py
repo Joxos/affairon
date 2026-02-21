@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from affairon.exceptions import KeyConflictError
@@ -19,6 +20,22 @@ def callable_name(cb: Any) -> str:
     return (
         getattr(cb, "__qualname__", None) or getattr(cb, "__name__", None) or repr(cb)
     )
+
+
+def normalize_name(name: str) -> str:
+    """Normalize a package/plugin name per PEP 503.
+
+    Replaces any run of hyphens, underscores, or periods with a single
+    hyphen and lower-cases the result, so that ``My_Plugin``,
+    ``my-plugin``, and ``my.plugin`` all map to ``my-plugin``.
+
+    Args:
+        name: Raw plugin or package name.
+
+    Returns:
+        Normalized name string.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def merge_dict(target: dict[str, Any], source: dict[str, Any]) -> None:
