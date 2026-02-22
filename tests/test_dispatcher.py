@@ -104,3 +104,110 @@ class TestEmitUp:
         result = d.emit(ChildAffair(msg="hi", extra="x", emit_up=True))
 
         assert result == {"from_child": True}
+
+
+class TestWhenFilter:
+    def test_when_true_fires_callback(self):
+        """Callback with when predicate returning True fires normally."""
+        d = Dispatcher()
+
+        @d.on(Ping, when=lambda a: a.msg == "yes")
+        def handler(affair: Ping) -> dict[str, str]:
+            return {"fired": affair.msg}
+
+        result = d.emit(Ping(msg="yes"))
+        assert result == {"fired": "yes"}
+
+    def test_when_false_skips_callback(self):
+        """Callback with when predicate returning False is skipped."""
+        d = Dispatcher()
+
+        @d.on(Ping, when=lambda a: a.msg == "yes")
+        def handler(affair: Ping) -> dict[str, str]:
+            return {"fired": affair.msg}
+
+        result = d.emit(Ping(msg="no"))
+        assert result == {}
+
+    def test_when_none_always_fires(self):
+        """Callback with when=None (default) fires unconditionally."""
+        d = Dispatcher()
+
+        @d.on(Ping)
+        def handler(affair: Ping) -> dict[str, str]:
+            return {"ok": "yes"}
+
+        assert d.emit(Ping(msg="anything")) == {"ok": "yes"}
+
+    def test_when_mixed_filtered_and_unfiltered(self):
+        """Only callbacks whose when predicate passes contribute results."""
+        d = Dispatcher()
+
+        @d.on(Ping, when=lambda a: a.msg == "target")
+        def selective(affair: Ping) -> dict[str, str]:
+            return {"selective": "yes"}
+
+        @d.on(Ping)
+        def always(affair: Ping) -> dict[str, str]:
+            return {"always": "yes"}
+
+        result = d.emit(Ping(msg="target"))
+        assert result == {"selective": "yes", "always": "yes"}
+
+        result = d.emit(Ping(msg="other"))
+        assert result == {"always": "yes"}
+
+    def test_when_via_register(self):
+        """when parameter works through register() method call."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"v": 1}, when=lambda a: a.msg == "go")
+
+        assert d.emit(Ping(msg="go")) == {"v": 1}
+        assert d.emit(Ping(msg="stop")) == {}
+
+    def test_when_with_emit_up(self):
+        """when predicate is checked per-affair-type during emit_up walk."""
+        d = Dispatcher()
+
+        d.register(
+            ParentAffair,
+            lambda e: {"parent": True},
+            when=lambda a: a.msg == "yes",
+        )
+        d.register(ChildAffair, lambda e: {"child": True})
+
+        # Parent predicate passes
+        result = d.emit(ChildAffair(msg="yes", extra="x", emit_up=True))
+        assert result == {"child": True, "parent": True}
+
+        # Parent predicate fails — only child fires
+        result = d.emit(ChildAffair(msg="no", extra="x", emit_up=True))
+        assert result == {"child": True}
+
+    def test_when_after_ordering_preserved(self):
+        """Filtered callbacks still respect after ordering for remaining ones."""
+        d = Dispatcher()
+        order: list[str] = []
+
+        @d.on(Ping)
+        def first(affair: Ping) -> None:
+            order.append("first")
+
+        @d.on(Ping, after=[first], when=lambda a: a.msg == "all")
+        def second(affair: Ping) -> None:
+            order.append("second")
+
+        @d.on(Ping, after=[first])
+        def third(affair: Ping) -> None:
+            order.append("third")
+
+        d.emit(Ping(msg="all"))
+        assert "first" in order
+        assert order.index("first") < order.index("second")
+        assert order.index("first") < order.index("third")
+
+        order.clear()
+        d.emit(Ping(msg="partial"))
+        assert "second" not in order
+        assert "first" in order
+        assert "third" in order

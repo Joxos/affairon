@@ -94,9 +94,12 @@ class AffairAware(metaclass=AffairAwareMeta):
         for func in marked:
             bound = unbound_to_bound[func]
             after = func._affair_after
+            when = getattr(func, "_affair_when", None)
             if after:
                 after = [unbound_to_bound.get(cb, cb) for cb in after]
-            func._affair_dispatcher.register(func._affair_types, bound, after=after)
+            func._affair_dispatcher.register(
+                func._affair_types, bound, after=after, when=when
+            )
             self._affair_registrations.append(
                 (func._affair_dispatcher, func._affair_types, bound)
             )

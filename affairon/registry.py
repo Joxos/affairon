@@ -5,6 +5,7 @@ with topological sorting and execution plan layering using NetworkX.
 """
 
 from collections import defaultdict
+from collections.abc import Callable
 
 import networkx as nx
 from loguru import logger
@@ -43,6 +44,7 @@ class BaseRegistry[CB]:
         affair_types: list[type[MutableAffair]],
         callback: CB,
         after: list[CB] | None = None,
+        when: Callable[[MutableAffair], bool] | None = None,
     ) -> None:
         """Register a listener for specified affair types.
 
@@ -50,6 +52,8 @@ class BaseRegistry[CB]:
             affair_types: MutableAffair types to register for.
             callback: Listener callback function.
             after: List of callbacks that should run before this one.
+            when: Optional predicate; callback fires only when
+                ``when(affair)`` returns True.  None means always fire.
 
         Post:
             callback added to each affair type's graph.
@@ -76,7 +80,7 @@ class BaseRegistry[CB]:
                         f"{affair_type.__qualname__}"
                     )
 
-            graph.add_node(callback)
+            graph.add_node(callback, when=when)
 
             # Add dependency edges (dep -> callback means dep executes before callback)
             for dep in after or [self._guardian]:
@@ -175,6 +179,31 @@ class BaseRegistry[CB]:
             # Clean up empty graphs
             for affair_type in affairs_to_clean:
                 del self._graphs[affair_type]
+
+    def should_fire(
+        self,
+        callback: CB,
+        affair_type: type[MutableAffair],
+        affair: MutableAffair,
+    ) -> bool:
+        """Check whether a callback should fire for a given affair instance.
+
+        Args:
+            callback: The registered callback.
+            affair_type: The affair type the callback is registered under.
+            affair: The affair instance being emitted.
+
+        Returns:
+            True if the callback has no ``when`` predicate or the predicate
+            returns True; False otherwise.
+        """
+        graph = self._graphs.get(affair_type)
+        if graph is None:
+            return False
+        when = graph.nodes[callback].get("when")
+        if when is None:
+            return True
+        return when(affair)
 
     def exec_order(self, affair_type: type[MutableAffair]) -> list[list[CB]]:
         """Return execution order for an affair type using breadth-first enumeration.

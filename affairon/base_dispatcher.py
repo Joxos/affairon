@@ -32,6 +32,7 @@ class BaseDispatcher[CB](ABC):
         self,
         *affair_types: type[A],
         after: list[Callable[[A], R]] | None = None,
+        when: Callable[[A], bool] | None = None,
     ) -> Callable[[Callable[[A], R]], Callable[[A], R]]:
         """Decorator to register a plain function as listener.
 
@@ -42,6 +43,8 @@ class BaseDispatcher[CB](ABC):
         Args:
             affair_types: MutableAffair types to listen for.
             after: List of callbacks that must execute before this one.
+            when: Optional predicate; callback fires only when
+                ``when(affair)`` returns True.
 
         Returns:
             Decorator function that returns the original function unchanged.
@@ -55,7 +58,12 @@ class BaseDispatcher[CB](ABC):
         """
 
         def decorator(func: Callable[[A], R]) -> Callable[[A], R]:
-            self.register(list(affair_types), func, after=after)  # type: ignore[arg-type]
+            self.register(
+                list(affair_types),
+                func,
+                after=after,
+                when=when,  # type: ignore[arg-type]
+            )
             return func
 
         return decorator
@@ -64,6 +72,7 @@ class BaseDispatcher[CB](ABC):
         self,
         *affair_types: type[A],
         after: list[Any] | None = None,
+        when: Callable[[A], bool] | None = None,
     ) -> Callable[[F], F]:
         """Decorator to mark a class method for deferred registration.
 
@@ -76,19 +85,23 @@ class BaseDispatcher[CB](ABC):
         Args:
             affair_types: MutableAffair types to listen for.
             after: List of callbacks that must execute before this one.
+            when: Optional predicate; callback fires only when
+                ``when(affair)`` returns True.
 
         Returns:
             Decorator function that returns the original function unchanged.
 
         Post:
-            ``_affair_types``, ``_affair_after``, ``_affair_dispatcher``
-            stamped on the function for later consumption by the metaclass.
+            ``_affair_types``, ``_affair_after``, ``_affair_dispatcher``,
+            ``_affair_when`` stamped on the function for later consumption
+            by the metaclass.
         """
 
         def decorator(func: F) -> F:
             func._affair_types = list(affair_types)  # type: ignore[attr-defined]
             func._affair_after = after  # type: ignore[attr-defined]
             func._affair_dispatcher = self  # type: ignore[attr-defined]
+            func._affair_when = when  # type: ignore[attr-defined]
             return func
 
         return decorator
@@ -99,6 +112,7 @@ class BaseDispatcher[CB](ABC):
         callback: CB,
         *,
         after: list[CB] | None = None,
+        when: Callable[[MutableAffair], bool] | None = None,
     ) -> None:
         """Register listener via method call.
 
@@ -106,6 +120,8 @@ class BaseDispatcher[CB](ABC):
             affair_types: MutableAffair type(s) to listen for.
             callback: Callback function.
             after: List of callbacks that must execute before this one.
+            when: Optional predicate; callback fires only when
+                ``when(affair)`` returns True.
 
         Post:
             Callback registered to all specified affair types.
@@ -117,7 +133,7 @@ class BaseDispatcher[CB](ABC):
         normalized_types = (
             affair_types if isinstance(affair_types, list) else [affair_types]
         )
-        self._registry.add(normalized_types, callback=callback, after=after)
+        self._registry.add(normalized_types, callback=callback, after=after, when=when)
 
     def unregister(
         self,

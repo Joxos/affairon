@@ -361,3 +361,65 @@ class TestAffairAwareContextManager:
             pass
 
         assert d.emit(Ping(msg="x")) == {}
+
+
+# =============================================================================
+# when filter on on_method()
+# =============================================================================
+
+
+class TestAffairAwareWhenFilter:
+    def test_on_method_when_true_fires(self):
+        """on_method with when predicate returning True fires normally."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @d.on_method(Ping, when=lambda a: a.msg == "yes")
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"fired": affair.msg}
+
+        Handler()
+        assert d.emit(Ping(msg="yes")) == {"fired": "yes"}
+
+    def test_on_method_when_false_skips(self):
+        """on_method with when predicate returning False is skipped."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @d.on_method(Ping, when=lambda a: a.msg == "yes")
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"fired": affair.msg}
+
+        Handler()
+        assert d.emit(Ping(msg="no")) == {}
+
+    def test_on_method_when_with_instance_state(self):
+        """when predicate works alongside instance state access."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            def __init__(self, tag: str):
+                self.tag = tag
+
+            @d.on_method(Ping, when=lambda a: a.msg != "skip")
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {self.tag: affair.msg}
+
+        Handler("h1")
+        assert d.emit(Ping(msg="hello")) == {"h1": "hello"}
+        assert d.emit(Ping(msg="skip")) == {}
+
+    def test_on_method_when_context_manager(self):
+        """when filter works with context manager lifecycle."""
+        d = Dispatcher()
+
+        class Handler(AffairAware):
+            @d.on_method(Ping, when=lambda a: a.msg == "go")
+            def handle(self, affair: Ping) -> dict[str, str]:
+                return {"ok": "yes"}
+
+        with Handler():
+            assert d.emit(Ping(msg="go")) == {"ok": "yes"}
+            assert d.emit(Ping(msg="stop")) == {}
+
+        assert d.emit(Ping(msg="go")) == {}

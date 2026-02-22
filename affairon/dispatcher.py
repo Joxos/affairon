@@ -65,6 +65,8 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
             layers = self._registry.exec_order(affair_type)
             for layer in layers:
                 for cb in layer:
+                    if not self._registry.should_fire(cb, affair_type, affair):
+                        continue
                     result = cb(affair)
                     if result is not None:
                         if not isinstance(result, dict):

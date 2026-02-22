@@ -65,10 +65,16 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
             layers = self._registry.exec_order(affair_type)
             for layer in layers:
                 tasks: list[asyncio.Task[dict[str, Any] | None]] = []
+                filtered_cbs: list[AsyncCallback] = []
                 async with asyncio.TaskGroup() as group:
                     for callback in layer:
+                        if not self._registry.should_fire(
+                            callback, affair_type, affair
+                        ):
+                            continue
+                        filtered_cbs.append(callback)
                         tasks.append(group.create_task(callback(affair)))
-                for cb, task in zip(layer, tasks, strict=True):
+                for cb, task in zip(filtered_cbs, tasks, strict=True):
                     result = task.result()
                     if result is not None:
                         if not isinstance(result, dict):
