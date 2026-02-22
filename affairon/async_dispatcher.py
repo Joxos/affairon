@@ -4,7 +4,7 @@ from typing import Any
 from loguru import logger
 
 from affairon._types import AsyncCallback
-from affairon.affairs import MutableAffair
+from affairon.affairs import CallbackErrorAffair, MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
 from affairon.utils import callable_name, merge_dict
 
@@ -32,6 +32,11 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
         When ``affair.emit_up`` is True, callbacks registered on parent
         affair types are also invoked, walking the MRO from child to
         parent.
+
+        If a callback raises an exception, the dispatcher emits a
+        :class:`CallbackErrorAffair`.  Error handlers may return control
+        keys (``retry``, ``deadletter``, ``silent``) to influence recovery.
+        Priority: retry first → deadletter → silent → re-raise.
 
         Warning:
             Listeners can recursively call emit(). Framework does not detect cycles.
@@ -73,7 +78,9 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
                         ):
                             continue
                         filtered_cbs.append(callback)
-                        tasks.append(group.create_task(callback(affair)))
+                        tasks.append(
+                            group.create_task(self._invoke_or_handle(callback, affair))
+                        )
                 for cb, task in zip(filtered_cbs, tasks, strict=True):
                     result = task.result()
                     if result is not None:
@@ -84,3 +91,79 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
                             )
                         merge_dict(merged_result, result)
         return merged_result
+
+    async def _invoke_or_handle(
+        self,
+        callback: AsyncCallback,
+        affair: MutableAffair,
+    ) -> dict[str, Any] | None:
+        """Invoke a callback, routing exceptions to error handling.
+
+        Wraps the callback invocation so that exceptions are caught
+        per-task rather than cancelling the entire TaskGroup.
+
+        Args:
+            callback: The async callback to invoke.
+            affair: The affair being dispatched.
+
+        Returns:
+            Callback result, or None if error was silenced/dead-lettered.
+
+        Raises:
+            Exception: Re-raised if no error handler suppresses it.
+        """
+        try:
+            return await callback(affair)
+        except Exception as exc:
+            return await self._handle_callback_error(callback, affair, exc)
+
+    async def _handle_callback_error(
+        self,
+        callback: AsyncCallback,
+        affair: MutableAffair,
+        exception: Exception,
+    ) -> dict[str, Any] | None:
+        """Handle a callback exception via CallbackErrorAffair.
+
+        Emits a :class:`CallbackErrorAffair` and reads the merged error
+        policy.  Retry is attempted first; on exhaustion, ``deadletter``
+        and ``silent`` are checked.
+
+        Args:
+            callback: The callback that raised.
+            affair: The affair being dispatched.
+            exception: The exception that was raised.
+
+        Returns:
+            Callback result on successful retry, or None when silenced
+            or dead-lettered.
+
+        Raises:
+            Exception: Re-raises *exception* when no handler suppresses it.
+        """
+        error_affair = CallbackErrorAffair(
+            listener_name=callable_name(callback),
+            original_affair_type=type(affair).__qualname__,
+            error_message=str(exception),
+            error_type=type(exception).__name__,
+        )
+        policy = await self.emit(error_affair)
+        retry, deadletter, silent = self._read_error_policy(policy)
+        log.debug(
+            "Error policy for {}: retry={}, deadletter={}, silent={}",
+            callable_name(callback),
+            retry,
+            deadletter,
+            silent,
+        )
+        while retry > 0:
+            retry -= 1
+            try:
+                return await callback(affair)
+            except Exception:
+                pass
+        if deadletter:
+            return None
+        if silent:
+            return None
+        raise exception

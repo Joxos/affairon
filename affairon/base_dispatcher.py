@@ -187,6 +187,34 @@ class BaseDispatcher[CB](ABC):
         raise NotImplementedError
 
     @staticmethod
+    def _read_error_policy(policy: dict[str, Any]) -> tuple[int, bool, bool]:
+        """Extract error-handling control keys from a merged handler result.
+
+        Reads ``retry``, ``deadletter``, and ``silent`` from *policy*,
+        applying safe type coercion and defaults.
+
+        Args:
+            policy: Merged dict returned by CallbackErrorAffair handlers.
+
+        Returns:
+            Tuple of (retry, deadletter, silent).
+
+        Raises:
+            TypeError: If ``retry`` cannot be converted to int.
+        """
+        retry_raw = policy.get("retry", 0)
+        try:
+            retry = int(retry_raw)
+        except (ValueError, TypeError) as exc:
+            raise TypeError(
+                f"'retry' must be int-convertible, got {type(retry_raw).__name__}: "
+                f"{retry_raw!r}"
+            ) from exc
+        deadletter = bool(policy.get("deadletter", False))
+        silent = bool(policy.get("silent", False))
+        return retry, deadletter, silent
+
+    @staticmethod
     def _resolve_affair_types(
         affair: MutableAffair,
     ) -> list[type[MutableAffair]]:

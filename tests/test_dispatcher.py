@@ -1,9 +1,9 @@
 """Tests for synchronous Dispatcher."""
 
 import pytest
-from conftest import ChildAffair, GrandchildAffair, ParentAffair, Ping
+from conftest import ChildAffair, GrandchildAffair, MutablePing, ParentAffair, Ping
 
-from affairon import Dispatcher, KeyConflictError, MutableAffair
+from affairon import CallbackErrorAffair, Dispatcher, KeyConflictError, MutableAffair
 
 
 class TestSyncDispatcher:
@@ -211,3 +211,156 @@ class TestWhenFilter:
         assert "second" not in order
         assert "first" in order
         assert "third" in order
+
+
+class TestCallbackErrorHandling:
+    def test_no_handler_reraises(self):
+        """No error handler registered → exception re-raised as-is."""
+        d = Dispatcher()
+        d.register(MutablePing, lambda e: (_ for _ in ()).throw(ValueError("boom")))
+
+        with pytest.raises(ValueError, match="boom"):
+            d.emit(MutablePing(msg="x"))
+
+    def test_silent_swallows_error(self):
+        """Error handler returning silent=True swallows the exception."""
+        d = Dispatcher()
+
+        d.register(MutablePing, lambda e: (_ for _ in ()).throw(ValueError("boom")))
+        d.register(CallbackErrorAffair, lambda e: {"silent": True})
+
+        result = d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    def test_retry_succeeds(self):
+        """Retry succeeds on second attempt, returns callback result."""
+        d = Dispatcher()
+        call_count = 0
+
+        @d.on(MutablePing)
+        def flaky(affair: MutablePing) -> dict[str, int]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("transient")
+            return {"attempt": call_count}
+
+        d.register(CallbackErrorAffair, lambda e: {"retry": 2})
+
+        result = d.emit(MutablePing(msg="x"))
+        assert result == {"attempt": 2}
+        assert call_count == 2
+
+    def test_retry_exhausted_reraises(self):
+        """All retries fail → exception re-raised."""
+        d = Dispatcher()
+        d.register(MutablePing, lambda e: (_ for _ in ()).throw(RuntimeError("fail")))
+        d.register(CallbackErrorAffair, lambda e: {"retry": 2})
+
+        with pytest.raises(RuntimeError, match="fail"):
+            d.emit(MutablePing(msg="x"))
+
+    def test_retry_exhausted_then_silent(self):
+        """All retries fail + silent=True → swallow error."""
+        d = Dispatcher()
+        d.register(MutablePing, lambda e: (_ for _ in ()).throw(RuntimeError("fail")))
+        d.register(CallbackErrorAffair, lambda e: {"retry": 2, "silent": True})
+
+        result = d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    def test_retry_exhausted_then_deadletter(self):
+        """All retries fail + deadletter=True → returns None (no re-raise)."""
+        d = Dispatcher()
+        d.register(MutablePing, lambda e: (_ for _ in ()).throw(RuntimeError("fail")))
+        d.register(CallbackErrorAffair, lambda e: {"retry": 1, "deadletter": True})
+
+        result = d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    def test_deadletter_without_retry(self):
+        """deadletter=True with no retry → returns None immediately."""
+        d = Dispatcher()
+        d.register(MutablePing, lambda e: (_ for _ in ()).throw(RuntimeError("fail")))
+        d.register(CallbackErrorAffair, lambda e: {"deadletter": True})
+
+        result = d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    def test_error_affair_fields_correct(self):
+        """CallbackErrorAffair carries correct metadata about the failure."""
+        d = Dispatcher()
+        captured = []
+
+        @d.on(MutablePing)
+        def failing(affair: MutablePing) -> None:
+            raise TypeError("bad type")
+
+        @d.on(CallbackErrorAffair)
+        def handler(affair: CallbackErrorAffair) -> dict[str, bool]:
+            captured.append(affair)
+            return {"silent": True}
+
+        d.emit(MutablePing(msg="x"))
+
+        assert len(captured) == 1
+        ea = captured[0]
+        assert "failing" in ea.listener_name
+        assert ea.original_affair_type == "MutablePing"
+        assert ea.error_message == "bad type"
+        assert ea.error_type == "TypeError"
+
+    def test_invalid_retry_value_raises_type_error(self):
+        """Non-int-convertible retry value raises TypeError."""
+        d = Dispatcher()
+        d.register(MutablePing, lambda e: (_ for _ in ()).throw(ValueError("x")))
+        d.register(CallbackErrorAffair, lambda e: {"retry": "not_a_number"})
+
+        with pytest.raises(TypeError, match="retry"):
+            d.emit(MutablePing(msg="x"))
+
+    def test_multiple_error_handlers_merge(self):
+        """Multiple error handlers merge their return dicts."""
+        d = Dispatcher()
+        d.register(MutablePing, lambda e: (_ for _ in ()).throw(RuntimeError("x")))
+        d.register(CallbackErrorAffair, lambda e: {"retry": 1})
+        d.register(CallbackErrorAffair, lambda e: {"silent": True})
+
+        # retry=1 will fail (always raises), then silent=True suppresses
+        result = d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    def test_error_handling_preserves_other_callback_results(self):
+        """Successful callbacks' results preserved when one fails silently."""
+        d = Dispatcher()
+
+        @d.on(MutablePing)
+        def good(affair: MutablePing) -> dict[str, str]:
+            return {"good": "yes"}
+
+        @d.on(MutablePing, after=[good])
+        def bad(affair: MutablePing) -> dict[str, str]:
+            raise ValueError("boom")
+
+        d.register(CallbackErrorAffair, lambda e: {"silent": True})
+
+        result = d.emit(MutablePing(msg="x"))
+        assert result == {"good": "yes"}
+
+    def test_retry_string_int_coercion(self):
+        """String '3' is coerced to int 3 for retry."""
+        d = Dispatcher()
+        call_count = 0
+
+        @d.on(MutablePing)
+        def flaky(affair: MutablePing) -> dict[str, int]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("transient")
+            return {"attempt": call_count}
+
+        d.register(CallbackErrorAffair, lambda e: {"retry": "2"})
+
+        result = d.emit(MutablePing(msg="x"))
+        assert result == {"attempt": 2}

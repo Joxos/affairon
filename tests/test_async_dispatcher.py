@@ -1,9 +1,9 @@
 """Tests for AsyncDispatcher."""
 
 import pytest
-from conftest import ChildAffair, GrandchildAffair, ParentAffair, Ping
+from conftest import ChildAffair, GrandchildAffair, MutablePing, ParentAffair, Ping
 
-from affairon import KeyConflictError, MutableAffair
+from affairon import CallbackErrorAffair, KeyConflictError, MutableAffair
 from affairon.async_dispatcher import AsyncDispatcher
 
 
@@ -228,3 +228,188 @@ class TestAsyncWhenFilter:
 
         result = await d.emit(ChildAffair(msg="no", extra="x", emit_up=True))
         assert result == {"child": True}
+
+
+class TestAsyncCallbackErrorHandling:
+    @pytest.mark.asyncio
+    async def test_no_handler_reraises(self):
+        """No error handler registered → exception re-raised as-is."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def bad(affair: MutablePing) -> None:
+            raise ValueError("boom")
+
+        with pytest.raises(ExceptionGroup) as exc_info:
+            await d.emit(MutablePing(msg="x"))
+        assert any(
+            isinstance(e, ValueError) and str(e) == "boom"
+            for e in exc_info.value.exceptions
+        )
+
+    @pytest.mark.asyncio
+    async def test_silent_swallows_error(self):
+        """Error handler returning silent=True swallows the exception."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def bad(affair: MutablePing) -> None:
+            raise ValueError("boom")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, bool]:
+            return {"silent": True}
+
+        result = await d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_retry_succeeds(self):
+        """Retry succeeds on second attempt, returns callback result."""
+        d = AsyncDispatcher()
+        call_count = 0
+
+        @d.on(MutablePing)
+        async def flaky(affair: MutablePing) -> dict[str, int]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("transient")
+            return {"attempt": call_count}
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, int]:
+            return {"retry": 2}
+
+        result = await d.emit(MutablePing(msg="x"))
+        assert result == {"attempt": 2}
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_exhausted_reraises(self):
+        """All retries fail → exception re-raised (surfaces as ExceptionGroup)."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def bad(affair: MutablePing) -> None:
+            raise RuntimeError("fail")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, int]:
+            return {"retry": 2}
+
+        with pytest.raises(ExceptionGroup):
+            await d.emit(MutablePing(msg="x"))
+
+    @pytest.mark.asyncio
+    async def test_retry_exhausted_then_silent(self):
+        """All retries fail + silent=True → swallow error."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def bad(affair: MutablePing) -> None:
+            raise RuntimeError("fail")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, int | bool]:
+            return {"retry": 2, "silent": True}
+
+        result = await d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_deadletter_without_retry(self):
+        """deadletter=True with no retry → returns None immediately."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def bad(affair: MutablePing) -> None:
+            raise RuntimeError("fail")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, bool]:
+            return {"deadletter": True}
+
+        result = await d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_error_affair_fields_correct(self):
+        """CallbackErrorAffair carries correct metadata about the failure."""
+        d = AsyncDispatcher()
+        captured: list[CallbackErrorAffair] = []
+
+        @d.on(MutablePing)
+        async def failing(affair: MutablePing) -> None:
+            raise TypeError("bad type")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, bool]:
+            captured.append(affair)
+            return {"silent": True}
+
+        await d.emit(MutablePing(msg="x"))
+
+        assert len(captured) == 1
+        ea = captured[0]
+        assert "failing" in ea.listener_name
+        assert ea.original_affair_type == "MutablePing"
+        assert ea.error_message == "bad type"
+        assert ea.error_type == "TypeError"
+
+    @pytest.mark.asyncio
+    async def test_error_handling_preserves_other_callback_results(self):
+        """Successful callbacks' results preserved when one fails silently."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def good(affair: MutablePing) -> dict[str, str]:
+            return {"good": "yes"}
+
+        @d.on(MutablePing, after=[good])
+        async def bad(affair: MutablePing) -> dict[str, str]:
+            raise ValueError("boom")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, bool]:
+            return {"silent": True}
+
+        result = await d.emit(MutablePing(msg="x"))
+        assert result == {"good": "yes"}
+
+    @pytest.mark.asyncio
+    async def test_parallel_errors_both_handled(self):
+        """Two parallel callbacks both fail → both handled independently."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def bad1(affair: MutablePing) -> None:
+            raise ValueError("e1")
+
+        @d.on(MutablePing)
+        async def bad2(affair: MutablePing) -> None:
+            raise ValueError("e2")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, bool]:
+            return {"silent": True}
+
+        # Both errors silenced, no ExceptionGroup
+        result = await d.emit(MutablePing(msg="x"))
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_invalid_retry_value_raises_type_error(self):
+        """Non-int-convertible retry value raises TypeError."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def bad(affair: MutablePing) -> None:
+            raise ValueError("x")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, str]:
+            return {"retry": "not_a_number"}
+
+        with pytest.raises(ExceptionGroup):
+            await d.emit(MutablePing(msg="x"))

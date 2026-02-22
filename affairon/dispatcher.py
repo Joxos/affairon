@@ -7,7 +7,7 @@ from loguru import logger
 from affairon._types import (
     SyncCallback,
 )
-from affairon.affairs import MutableAffair
+from affairon.affairs import CallbackErrorAffair, MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
 from affairon.utils import callable_name, merge_dict
 
@@ -34,6 +34,11 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
         When ``affair.emit_up`` is True, callbacks registered on parent
         affair types are also invoked, walking the MRO from child to
         parent.
+
+        If a callback raises an exception, the dispatcher emits a
+        :class:`CallbackErrorAffair`.  Error handlers may return control
+        keys (``retry``, ``deadletter``, ``silent``) to influence recovery.
+        Priority: retry first → deadletter → silent → re-raise.
 
         Warning:
             Listeners can recursively call emit(). Framework does not detect cycles.
@@ -67,7 +72,10 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
                 for cb in layer:
                     if not self._registry.should_fire(cb, affair_type, affair):
                         continue
-                    result = cb(affair)
+                    try:
+                        result = cb(affair)
+                    except Exception as exc:
+                        result = self._handle_callback_error(cb, affair, exc)
                     if result is not None:
                         if not isinstance(result, dict):
                             raise TypeError(
@@ -76,3 +84,54 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
                             )
                         merge_dict(merged_result, result)
         return merged_result
+
+    def _handle_callback_error(
+        self,
+        callback: SyncCallback,
+        affair: MutableAffair,
+        exception: Exception,
+    ) -> dict[str, Any] | None:
+        """Handle a callback exception via CallbackErrorAffair.
+
+        Emits a :class:`CallbackErrorAffair` and reads the merged error
+        policy.  Retry is attempted first; on exhaustion, ``deadletter``
+        and ``silent`` are checked.
+
+        Args:
+            callback: The callback that raised.
+            affair: The affair being dispatched.
+            exception: The exception that was raised.
+
+        Returns:
+            Callback result on successful retry, or None when silenced
+            or dead-lettered.
+
+        Raises:
+            Exception: Re-raises *exception* when no handler suppresses it.
+        """
+        error_affair = CallbackErrorAffair(
+            listener_name=callable_name(callback),
+            original_affair_type=type(affair).__qualname__,
+            error_message=str(exception),
+            error_type=type(exception).__name__,
+        )
+        policy = self.emit(error_affair)
+        retry, deadletter, silent = self._read_error_policy(policy)
+        log.debug(
+            "Error policy for {}: retry={}, deadletter={}, silent={}",
+            callable_name(callback),
+            retry,
+            deadletter,
+            silent,
+        )
+        while retry > 0:
+            retry -= 1
+            try:
+                return callback(affair)
+            except Exception:
+                pass
+        if deadletter:
+            return None
+        if silent:
+            return None
+        raise exception
