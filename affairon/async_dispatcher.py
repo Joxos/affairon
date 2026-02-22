@@ -55,10 +55,12 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
 
         Raises:
             TypeError: If listener returns non-dict value.
-            KeyConflictError: If merging dicts causes key conflict.
+            KeyConflictError: If merging dicts causes key conflict
+                (only when strategy is ``"raise"``).
             RecursionError: If listeners form infinite recursion chain.
             ExceptionGroup: If multiple listeners fail simultaneously.
         """
+        strategy = affair.merge_strategy
         merged_result: dict[str, Any] = {}
         affair_types = self._resolve_affair_types(affair)
         log.debug(
@@ -89,7 +91,12 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
                                 f"Callback {callable_name(cb)} returned "
                                 f"{type(result).__name__}, expected dict or None"
                             )
-                        merge_dict(merged_result, result)
+                        merge_dict(
+                            merged_result,
+                            result,
+                            strategy=strategy,
+                            source_name=callable_name(cb),
+                        )
         return merged_result
 
     async def _invoke_or_handle(
@@ -128,6 +135,10 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
         Emits a :class:`CallbackErrorAffair` and reads the merged error
         policy.  Retry is attempted first; on exhaustion, ``deadletter``
         and ``silent`` are checked.
+
+        Always dispatches the error affair with ``"raise"`` strategy to
+        ensure error policy dicts are never wrapped by ``list_merge`` or
+        ``dict_merge``.
 
         Args:
             callback: The callback that raised.

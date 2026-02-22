@@ -5,11 +5,21 @@ and framework meta-affairs (AffairMain, CallbackErrorAffair, etc.).
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from affairon.exceptions import AffairValidationError
+
+type MergeStrategy = Literal["raise", "keep", "override", "list_merge", "dict_merge"]
+"""Strategy for resolving key conflicts when merging callback results.
+
+- ``raise``: Raise :class:`KeyConflictError` on duplicate keys (default).
+- ``keep``: Keep the first value, discard later duplicates.
+- ``override``: Last value wins, silently replaces earlier ones.
+- ``list_merge``: Collect all values into a list per key.
+- ``dict_merge``: Collect all values into a dict keyed by callback name.
+"""
 
 
 class MutableAffair(BaseModel):
@@ -21,11 +31,14 @@ class MutableAffair(BaseModel):
         emit_up: When True, emitting this affair also triggers callbacks
             registered on parent affair types, walking the MRO from child
             to parent.  Defaults to False (only the concrete type fires).
+        merge_strategy: Strategy for resolving key conflicts when merging
+            callback results.  Defaults to ``"raise"``.
     """
 
     model_config = ConfigDict(validate_assignment=True, extra="forbid", strict=True)
 
     emit_up: bool = False
+    merge_strategy: MergeStrategy = "raise"
 
     def __init__(self, **data: Any) -> None:
         """Wrap pydantic ValidationError into AffairValidationError."""

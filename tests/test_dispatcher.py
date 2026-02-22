@@ -364,3 +364,210 @@ class TestCallbackErrorHandling:
 
         result = d.emit(MutablePing(msg="x"))
         assert result == {"attempt": 2}
+
+
+class TestMergeStrategyRaise:
+    def test_raise_is_default(self):
+        """Default strategy raises KeyConflictError on duplicate keys."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"k": 1})
+        d.register(Ping, lambda e: {"k": 2})
+        with pytest.raises(KeyConflictError):
+            d.emit(Ping(msg="x"))
+
+    def test_raise_explicit(self):
+        """Explicit raise strategy raises KeyConflictError on conflict."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"k": 1})
+        d.register(Ping, lambda e: {"k": 2})
+        with pytest.raises(KeyConflictError):
+            d.emit(Ping(msg="x", merge_strategy="raise"))
+
+    def test_raise_no_conflict_merges(self):
+        """No conflict under raise strategy merges normally."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"a": 1})
+        d.register(Ping, lambda e: {"b": 2})
+        assert d.emit(Ping(msg="x", merge_strategy="raise")) == {"a": 1, "b": 2}
+
+
+class TestMergeStrategyKeep:
+    def test_keep_first_value_wins(self):
+        """Keep strategy retains the first value for a duplicate key."""
+        d = Dispatcher()
+        order = []
+
+        @d.on(Ping)
+        def first(e: Ping) -> dict[str, int]:
+            order.append("first")
+            return {"k": 1}
+
+        @d.on(Ping, after=[first])
+        def second(e: Ping) -> dict[str, int]:
+            order.append("second")
+            return {"k": 2}
+
+        result = d.emit(Ping(msg="x", merge_strategy="keep"))
+        assert result == {"k": 1}
+        assert order == ["first", "second"]
+
+    def test_keep_no_conflict(self):
+        """Keep strategy merges disjoint keys normally."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"a": 1})
+        d.register(Ping, lambda e: {"b": 2})
+        assert d.emit(Ping(msg="x", merge_strategy="keep")) == {"a": 1, "b": 2}
+
+
+class TestMergeStrategyOverride:
+    def test_override_last_value_wins(self):
+        """Override strategy replaces with the last value for a duplicate key."""
+        d = Dispatcher()
+        order = []
+
+        @d.on(Ping)
+        def first(e: Ping) -> dict[str, int]:
+            order.append("first")
+            return {"k": 1}
+
+        @d.on(Ping, after=[first])
+        def second(e: Ping) -> dict[str, int]:
+            order.append("second")
+            return {"k": 2}
+
+        result = d.emit(Ping(msg="x", merge_strategy="override"))
+        assert result == {"k": 2}
+        assert order == ["first", "second"]
+
+    def test_override_no_conflict(self):
+        """Override strategy merges disjoint keys normally."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"a": 1})
+        d.register(Ping, lambda e: {"b": 2})
+        assert d.emit(Ping(msg="x", merge_strategy="override")) == {"a": 1, "b": 2}
+
+
+class TestMergeStrategyListMerge:
+    def test_list_merge_collects_values(self):
+        """list_merge wraps all values into lists and appends on conflict."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"k": 1})
+        d.register(Ping, lambda e: {"k": 2})
+        assert d.emit(Ping(msg="x", merge_strategy="list_merge")) == {"k": [1, 2]}
+
+    def test_list_merge_single_value(self):
+        """list_merge wraps single-callback value in a list."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"k": "only"})
+        assert d.emit(Ping(msg="x", merge_strategy="list_merge")) == {"k": ["only"]}
+
+    def test_list_merge_disjoint_keys(self):
+        """list_merge wraps each disjoint key as a single-element list."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"a": 1})
+        d.register(Ping, lambda e: {"b": 2})
+        assert d.emit(Ping(msg="x", merge_strategy="list_merge")) == {
+            "a": [1],
+            "b": [2],
+        }
+
+    def test_list_merge_three_callbacks(self):
+        """list_merge collects values from three callbacks into one list."""
+        d = Dispatcher()
+        d.register(Ping, lambda e: {"k": 1})
+        d.register(Ping, lambda e: {"k": 2})
+        d.register(Ping, lambda e: {"k": 3})
+        assert d.emit(Ping(msg="x", merge_strategy="list_merge")) == {"k": [1, 2, 3]}
+
+
+class TestMergeStrategyDictMerge:
+    def test_dict_merge_collects_by_callback_name(self):
+        """dict_merge stores values keyed by callback qualname."""
+        d = Dispatcher()
+
+        @d.on(Ping)
+        def alpha(e: Ping) -> dict[str, int]:
+            return {"k": 1}
+
+        @d.on(Ping)
+        def beta(e: Ping) -> dict[str, int]:
+            return {"k": 2}
+
+        result = d.emit(Ping(msg="x", merge_strategy="dict_merge"))
+        assert "alpha" in str(result["k"])
+        assert "beta" in str(result["k"])
+        assert len(result["k"]) == 2
+
+    def test_dict_merge_single_value(self):
+        """dict_merge wraps single-callback value in a dict."""
+        d = Dispatcher()
+
+        @d.on(Ping)
+        def handler(e: Ping) -> dict[str, int]:
+            return {"k": 42}
+
+        result = d.emit(Ping(msg="x", merge_strategy="dict_merge"))
+        assert isinstance(result["k"], dict)
+        assert 42 in result["k"].values()
+
+    def test_dict_merge_disjoint_keys(self):
+        """dict_merge wraps each disjoint key as a single-entry dict."""
+        d = Dispatcher()
+
+        @d.on(Ping)
+        def handler(e: Ping) -> dict[str, int]:
+            return {"a": 1, "b": 2}
+
+        result = d.emit(Ping(msg="x", merge_strategy="dict_merge"))
+        assert isinstance(result["a"], dict)
+        assert isinstance(result["b"], dict)
+
+
+class TestMergeStrategyWithErrorHandling:
+    def test_error_handler_uses_raise_strategy(self):
+        """Error affair dispatch always uses raise strategy internally."""
+        d = Dispatcher()
+
+        @d.on(MutablePing)
+        def bad(affair: MutablePing) -> None:
+            raise ValueError("boom")
+
+        @d.on(CallbackErrorAffair)
+        def handler(affair: CallbackErrorAffair) -> dict[str, bool]:
+            return {"silent": True}
+
+        # Should not wrap silent as [True] — error dispatch uses "raise"
+        result = d.emit(MutablePing(msg="x", merge_strategy="list_merge"))
+        assert result == {}
+
+    def test_retry_with_non_raise_strategy(self):
+        """Retry works correctly when dispatcher uses non-raise strategy."""
+        d = Dispatcher()
+        call_count = 0
+
+        @d.on(MutablePing)
+        def flaky(affair: MutablePing) -> dict[str, int]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("transient")
+            return {"attempt": call_count}
+
+        @d.on(CallbackErrorAffair)
+        def handler(affair: CallbackErrorAffair) -> dict[str, int]:
+            return {"retry": 2}
+
+        result = d.emit(MutablePing(msg="x", merge_strategy="override"))
+        assert result == {"attempt": 2}
+
+    def test_list_merge_with_emit_up(self):
+        """list_merge collects values across emit_up hierarchy."""
+        d = Dispatcher()
+
+        d.register(ParentAffair, lambda e: {"k": "parent"})
+        d.register(ChildAffair, lambda e: {"k": "child"})
+
+        result = d.emit(
+            ChildAffair(msg="hi", extra="x", emit_up=True, merge_strategy="list_merge")
+        )
+        assert result == {"k": ["child", "parent"]}

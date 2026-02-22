@@ -8,7 +8,7 @@ to avoid duplicating the result shape.
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from affairon.affairs import MutableAffair
+from affairon.affairs import MergeStrategy, MutableAffair
 
 type StandardResult[V] = dict[str, V] | None
 """Generic result type for affair callbacks.
@@ -22,3 +22,10 @@ type SyncCallback = Callable[[MutableAffair], StandardResult[Any]]
 
 type AsyncCallback = Callable[[MutableAffair], Coroutine[Any, Any, StandardResult[Any]]]
 """Internal storage type for asynchronous affair callbacks."""
+
+__all__ = [
+    "AsyncCallback",
+    "MergeStrategy",
+    "StandardResult",
+    "SyncCallback",
+]

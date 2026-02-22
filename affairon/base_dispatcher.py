@@ -20,11 +20,12 @@ class BaseDispatcher[CB](ABC):
     _guardian: CB  # Guardian callback to anchor execution order
     _registry: BaseRegistry[CB]  # Registry for managing listeners
 
-    def __init__(
-        self,
-        guardian: CB,
-    ) -> None:
-        """Initialize dispatcher."""
+    def __init__(self, guardian: CB) -> None:
+        """Initialize dispatcher.
+
+        Args:
+            guardian: Guardian callback to anchor execution order.
+        """
         self._guardian = guardian
         self._registry = BaseRegistry[CB](self._guardian)
 

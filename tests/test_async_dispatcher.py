@@ -413,3 +413,283 @@ class TestAsyncCallbackErrorHandling:
 
         with pytest.raises(ExceptionGroup):
             await d.emit(MutablePing(msg="x"))
+
+
+class TestAsyncMergeStrategyRaise:
+    @pytest.mark.asyncio
+    async def test_raise_is_default(self):
+        """Default strategy raises KeyConflictError on duplicate keys."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def h1(e: MutableAffair) -> dict:
+            return {"k": 1}
+
+        @d.on(Ping)
+        async def h2(e: MutableAffair) -> dict:
+            return {"k": 2}
+
+        with pytest.raises(KeyConflictError):
+            await d.emit(Ping(msg="x"))
+
+    @pytest.mark.asyncio
+    async def test_raise_no_conflict_merges(self):
+        """No conflict under raise strategy merges normally."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def h1(e: MutableAffair) -> dict:
+            return {"a": 1}
+
+        @d.on(Ping)
+        async def h2(e: MutableAffair) -> dict:
+            return {"b": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="raise"))
+        assert result == {"a": 1, "b": 2}
+
+
+class TestAsyncMergeStrategyKeep:
+    @pytest.mark.asyncio
+    async def test_keep_first_value_wins(self):
+        """Keep strategy retains the first value for a duplicate key."""
+        d = AsyncDispatcher()
+        order = []
+
+        @d.on(Ping)
+        async def first(e: Ping) -> dict:
+            order.append("first")
+            return {"k": 1}
+
+        @d.on(Ping, after=[first])
+        async def second(e: Ping) -> dict:
+            order.append("second")
+            return {"k": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="keep"))
+        assert result == {"k": 1}
+        assert order == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_keep_no_conflict(self):
+        """Keep strategy merges disjoint keys normally."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def h1(e: MutableAffair) -> dict:
+            return {"a": 1}
+
+        @d.on(Ping)
+        async def h2(e: MutableAffair) -> dict:
+            return {"b": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="keep"))
+        assert result == {"a": 1, "b": 2}
+
+
+class TestAsyncMergeStrategyOverride:
+    @pytest.mark.asyncio
+    async def test_override_last_value_wins(self):
+        """Override strategy replaces with the last value for a duplicate key."""
+        d = AsyncDispatcher()
+        order = []
+
+        @d.on(Ping)
+        async def first(e: Ping) -> dict:
+            order.append("first")
+            return {"k": 1}
+
+        @d.on(Ping, after=[first])
+        async def second(e: Ping) -> dict:
+            order.append("second")
+            return {"k": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="override"))
+        assert result == {"k": 2}
+        assert order == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_override_no_conflict(self):
+        """Override strategy merges disjoint keys normally."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def h1(e: MutableAffair) -> dict:
+            return {"a": 1}
+
+        @d.on(Ping)
+        async def h2(e: MutableAffair) -> dict:
+            return {"b": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="override"))
+        assert result == {"a": 1, "b": 2}
+
+
+class TestAsyncMergeStrategyListMerge:
+    @pytest.mark.asyncio
+    async def test_list_merge_collects_values(self):
+        """list_merge wraps all values into lists and appends on conflict."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def h1(e: MutableAffair) -> dict:
+            return {"k": 1}
+
+        @d.on(Ping)
+        async def h2(e: MutableAffair) -> dict:
+            return {"k": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="list_merge"))
+        assert result == {"k": [1, 2]}
+
+    @pytest.mark.asyncio
+    async def test_list_merge_single_value(self):
+        """list_merge wraps single-callback value in a list."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def handler(e: MutableAffair) -> dict:
+            return {"k": "only"}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="list_merge"))
+        assert result == {"k": ["only"]}
+
+    @pytest.mark.asyncio
+    async def test_list_merge_disjoint_keys(self):
+        """list_merge wraps each disjoint key as a single-element list."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def h1(e: MutableAffair) -> dict:
+            return {"a": 1}
+
+        @d.on(Ping)
+        async def h2(e: MutableAffair) -> dict:
+            return {"b": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="list_merge"))
+        assert result == {"a": [1], "b": [2]}
+
+    @pytest.mark.asyncio
+    async def test_list_merge_three_callbacks(self):
+        """list_merge collects values from three callbacks into one list."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def h1(e: MutableAffair) -> dict:
+            return {"k": 1}
+
+        @d.on(Ping)
+        async def h2(e: MutableAffair) -> dict:
+            return {"k": 2}
+
+        @d.on(Ping)
+        async def h3(e: MutableAffair) -> dict:
+            return {"k": 3}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="list_merge"))
+        assert result == {"k": [1, 2, 3]}
+
+
+class TestAsyncMergeStrategyDictMerge:
+    @pytest.mark.asyncio
+    async def test_dict_merge_collects_by_callback_name(self):
+        """dict_merge stores values keyed by callback qualname."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def alpha(e: Ping) -> dict:
+            return {"k": 1}
+
+        @d.on(Ping)
+        async def beta(e: Ping) -> dict:
+            return {"k": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="dict_merge"))
+        assert "alpha" in str(result["k"])
+        assert "beta" in str(result["k"])
+        assert len(result["k"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_dict_merge_single_value(self):
+        """dict_merge wraps single-callback value in a dict."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def handler(e: Ping) -> dict:
+            return {"k": 42}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="dict_merge"))
+        assert isinstance(result["k"], dict)
+        assert 42 in result["k"].values()
+
+    @pytest.mark.asyncio
+    async def test_dict_merge_disjoint_keys(self):
+        """dict_merge wraps each disjoint key as a single-entry dict."""
+        d = AsyncDispatcher()
+
+        @d.on(Ping)
+        async def handler(e: Ping) -> dict:
+            return {"a": 1, "b": 2}
+
+        result = await d.emit(Ping(msg="x", merge_strategy="dict_merge"))
+        assert isinstance(result["a"], dict)
+        assert isinstance(result["b"], dict)
+
+
+class TestAsyncMergeStrategyWithErrorHandling:
+    @pytest.mark.asyncio
+    async def test_error_handler_uses_raise_strategy(self):
+        """Error affair dispatch always uses raise strategy internally."""
+        d = AsyncDispatcher()
+
+        @d.on(MutablePing)
+        async def bad(affair: MutablePing) -> None:
+            raise ValueError("boom")
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, bool]:
+            return {"silent": True}
+
+        # Should not wrap silent as [True] — error dispatch uses "raise"
+        result = await d.emit(MutablePing(msg="x", merge_strategy="list_merge"))
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_retry_with_non_raise_strategy(self):
+        """Retry works correctly when dispatcher uses non-raise strategy."""
+        d = AsyncDispatcher()
+        call_count = 0
+
+        @d.on(MutablePing)
+        async def flaky(affair: MutablePing) -> dict[str, int]:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("transient")
+            return {"attempt": call_count}
+
+        @d.on(CallbackErrorAffair)
+        async def handler(affair: CallbackErrorAffair) -> dict[str, int]:
+            return {"retry": 2}
+
+        result = await d.emit(MutablePing(msg="x", merge_strategy="override"))
+        assert result == {"attempt": 2}
+
+    @pytest.mark.asyncio
+    async def test_list_merge_with_emit_up(self):
+        """list_merge collects values across emit_up hierarchy."""
+        d = AsyncDispatcher()
+
+        @d.on(ParentAffair)
+        async def parent_handler(e: MutableAffair) -> dict:
+            return {"k": "parent"}
+
+        @d.on(ChildAffair)
+        async def child_handler(e: MutableAffair) -> dict:
+            return {"k": "child"}
+
+        result = await d.emit(
+            ChildAffair(msg="hi", extra="x", emit_up=True, merge_strategy="list_merge")
+        )
+        assert result == {"k": ["child", "parent"]}

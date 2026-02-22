@@ -4,9 +4,7 @@ from typing import Any
 
 from loguru import logger
 
-from affairon._types import (
-    SyncCallback,
-)
+from affairon._types import SyncCallback
 from affairon.affairs import CallbackErrorAffair, MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
 from affairon.utils import callable_name, merge_dict
@@ -56,9 +54,11 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
 
         Raises:
             TypeError: If listener returns non-dict value.
-            KeyConflictError: If merging dicts causes key conflict.
+            KeyConflictError: If merging dicts causes key conflict
+                (only when ``affair.merge_strategy`` is ``"raise"``).
             RecursionError: If listeners form infinite recursion chain.
         """
+        strategy = affair.merge_strategy
         merged_result: dict[str, Any] = {}
         affair_types = self._resolve_affair_types(affair)
         log.debug(
@@ -82,7 +82,12 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
                                 f"Callback {callable_name(cb)} returned "
                                 f"{type(result).__name__}, expected dict or None"
                             )
-                        merge_dict(merged_result, result)
+                        merge_dict(
+                            merged_result,
+                            result,
+                            strategy=strategy,
+                            source_name=callable_name(cb),
+                        )
         return merged_result
 
     def _handle_callback_error(
@@ -96,6 +101,10 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
         Emits a :class:`CallbackErrorAffair` and reads the merged error
         policy.  Retry is attempted first; on exhaustion, ``deadletter``
         and ``silent`` are checked.
+
+        ``CallbackErrorAffair`` defaults to ``merge_strategy="raise"``,
+        so error policy dicts are never wrapped by ``list_merge`` or
+        ``dict_merge``.
 
         Args:
             callback: The callback that raised.

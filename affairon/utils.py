@@ -1,6 +1,7 @@
 import re
 from typing import Any
 
+from affairon.affairs import MergeStrategy
 from affairon.exceptions import KeyConflictError
 
 
@@ -38,17 +39,95 @@ def normalize_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def merge_dict(target: dict[str, Any], source: dict[str, Any]) -> None:
-    """Merge source dict into target dict.
+# ---------------------------------------------------------------------------
+# Merge helpers
+# ---------------------------------------------------------------------------
+
+
+def _wrap_value(strategy: MergeStrategy, value: Any, source_name: str) -> Any:
+    """Transform a value on first insertion based on merge strategy.
+
+    For ``list_merge`` every value is stored as a single-element list;
+    for ``dict_merge`` every value is stored as ``{source_name: value}``.
+    Other strategies store the raw value.
+
+    Args:
+        strategy: Active merge strategy.
+        value: Raw value from callback return dict.
+        source_name: Callback display name.
+
+    Returns:
+        Wrapped value (list / dict) or original value.
+    """
+    match strategy:
+        case "list_merge":
+            return [value]
+        case "dict_merge":
+            return {source_name: value}
+        case _:
+            return value
+
+
+def _resolve_conflict(
+    strategy: MergeStrategy,
+    key: str,
+    existing: Any,
+    new_value: Any,
+    source_name: str,
+) -> Any:
+    """Resolve a key conflict between existing and new values.
+
+    Args:
+        strategy: Active merge strategy.
+        key: The conflicting key.
+        existing: Current value in target.
+        new_value: Incoming value from source.
+        source_name: Callback display name.
+
+    Returns:
+        Resolved value.
+
+    Raises:
+        KeyConflictError: When strategy is ``raise``.
+    """
+    match strategy:
+        case "raise":
+            raise KeyConflictError(f"Key conflict: {{'{key}'}}")
+        case "keep":
+            return existing
+        case "override":
+            return new_value
+        case "list_merge":
+            existing.append(new_value)
+            return existing
+        case "dict_merge":
+            existing[source_name] = new_value
+            return existing
+
+
+def merge_dict(
+    target: dict[str, Any],
+    source: dict[str, Any],
+    *,
+    strategy: MergeStrategy = "raise",
+    source_name: str = "",
+) -> None:
+    """Merge source dict into target dict using the given strategy.
 
     Args:
         target: Target dict (modified in place).
         source: Source dict.
+        strategy: Conflict resolution strategy.
+        source_name: Display name of the source callback (used by
+            ``dict_merge`` strategy).
 
     Raises:
-        KeyConflictError: When target and source have overlapping keys.
+        KeyConflictError: When strategy is ``raise`` and keys overlap.
     """
-    conflicts = set(target.keys()) & set(source.keys())
-    if conflicts:
-        raise KeyConflictError(f"Key conflict: {conflicts}")
-    target.update(source)
+    for key, value in source.items():
+        if key in target:
+            target[key] = _resolve_conflict(
+                strategy, key, target[key], value, source_name
+            )
+        else:
+            target[key] = _wrap_value(strategy, value, source_name)
