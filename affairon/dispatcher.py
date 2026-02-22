@@ -9,7 +9,7 @@ from affairon._types import (
 )
 from affairon.affairs import MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
-from affairon.utils import merge_dict
+from affairon.utils import callable_name, merge_dict
 
 log = logger.bind(source=__name__)
 
@@ -67,5 +67,10 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
                 for cb in layer:
                     result = cb(affair)
                     if result is not None:
+                        if not isinstance(result, dict):
+                            raise TypeError(
+                                f"Callback {callable_name(cb)} returned "
+                                f"{type(result).__name__}, expected dict or None"
+                            )
                         merge_dict(merged_result, result)
         return merged_result

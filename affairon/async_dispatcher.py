@@ -6,7 +6,7 @@ from loguru import logger
 from affairon._types import AsyncCallback
 from affairon.affairs import MutableAffair
 from affairon.base_dispatcher import BaseDispatcher
-from affairon.utils import merge_dict
+from affairon.utils import callable_name, merge_dict
 
 log = logger.bind(source=__name__)
 
@@ -68,8 +68,13 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
                 async with asyncio.TaskGroup() as group:
                     for callback in layer:
                         tasks.append(group.create_task(callback(affair)))
-                for task in tasks:
+                for cb, task in zip(layer, tasks, strict=True):
                     result = task.result()
                     if result is not None:
+                        if not isinstance(result, dict):
+                            raise TypeError(
+                                f"Callback {callable_name(cb)} returned "
+                                f"{type(result).__name__}, expected dict or None"
+                            )
                         merge_dict(merged_result, result)
         return merged_result
