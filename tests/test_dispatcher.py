@@ -160,7 +160,11 @@ class TestWhenFilter:
     def test_when_via_register(self):
         """when parameter works through register() method call."""
         d = Dispatcher()
-        d.register(Ping, lambda e: {"v": 1}, when=lambda a: a.msg == "go")
+        d.register(
+            Ping,
+            lambda e: {"v": 1},
+            when=lambda a: a.msg == "go",  # type: ignore[attr-defined]
+        )
 
         assert d.emit(Ping(msg="go")) == {"v": 1}
         assert d.emit(Ping(msg="stop")) == {}
@@ -172,7 +176,7 @@ class TestWhenFilter:
         d.register(
             ParentAffair,
             lambda e: {"parent": True},
-            when=lambda a: a.msg == "yes",
+            when=lambda a: a.msg == "yes",  # type: ignore[attr-defined]
         )
         d.register(ChildAffair, lambda e: {"child": True})
 
