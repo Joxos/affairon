@@ -73,12 +73,14 @@ result = dispatcher.emit(AddIngredients(ingredients=("egg",)))
 
 ## 插件系统
 
-Affairon 支持两种插件，均通过 `pyproject.toml` 声明：
+Affairon 支持两种插件来源，均通过 `pyproject.toml` 声明：
 
 ### 外部插件（入口点）
 
 外部包通过 `affairon.plugins` 入口点组注册。
-宿主应用在 `[tool.affairon] plugins` 中使用 PEP 508 需求字符串声明：
+入口点目标可以是模块中的任意符号；affairon 会导入该模块，
+并自动注册模块级 `@listen` 回调。
+宿主应用在 `[tool.affairon] plugins` 中使用 PEP 508 需求字符串声明包：
 
 ```toml
 # 宿主的 pyproject.toml
@@ -89,26 +91,31 @@ plugins = ["my-plugin>=1.0"]
 ```toml
 # 插件的 pyproject.toml
 [project.entry-points."affairon.plugins"]
-my-plugin = "my_plugin.lib"
+my-plugin = "my_plugin.lib:any_symbol"
 ```
 
-### 本地插件（直接导入）
+### 本地插件（模块导入）
 
 宿主应用自身的模块可以通过 `local_plugins` 声明。
-它们会被直接导入，通过装饰器触发回调注册：
+每一项都必须是模块路径：
 
 ```toml
 [tool.affairon]
 local_plugins = ["myapp.lib", "myapp.host"]
 ```
 
-**加载顺序**：先加载外部插件，再加载本地插件。
+组装阶段会导入每个模块，并仅自动注册该模块内定义的 `@listen` 回调
+（导入进来的回调会被忽略，避免重复注册）。
+
+**加载顺序**：先加载本地插件，再加载外部插件。这样宿主回调会先注册好，
+外部扩展才能安全地通过 `after=[...]` 依赖它们。
 
 ---
 
 ## CLI 运行器 — `fairun`
 
-`fairun` 是内置的命令行工具，读取 `pyproject.toml`，组装所有插件，然后发射 `AffairMain` 事务以启动应用：
+`fairun` 是内置的命令行工具：读取 `pyproject.toml`，先选择 dispatcher，
+再在同一个 dispatcher 上组装插件并发射 `AffairMain` 事务：
 
 ```bash
 fairun /path/to/project
@@ -119,11 +126,13 @@ fairun
 应用通过监听 `AffairMain` 定义入口点：
 
 ```python
-from affairon import AffairMain, default_dispatcher as dispatcher
+from affairon import AffairMain
+from affairon.listen import listen
 
-@dispatcher.on(AffairMain)
+@listen(AffairMain)
 def main(affair: AffairMain) -> None:
     print(f"Running from {affair.project_path}")
+# affair.dispatcher 即 fairun 选择的 dispatcher 实例。
 ```
 
 ---
@@ -131,10 +140,12 @@ def main(affair: AffairMain) -> None:
 ## 类式处理器 — `AffairAware`
 
 如果希望以类的方式组织回调，可以继承 `AffairAware`。
-类方法使用 `on_method()`（而非 `on()`）进行装饰——实例化时自动注册为绑定回调，无需调用 `super().__init__()`：
+类方法使用 `@listen` 装饰，并在实例化时传入 `dispatcher=`。
+绑定回调会在 `__init__` 完成后自动注册，且仍然无需调用 `super().__init__()`：
 
 ```python
 from affairon import AffairAware, Dispatcher
+from affairon.listen import listen
 
 d = Dispatcher()
 
@@ -142,29 +153,29 @@ class Kitchen(AffairAware):
     def __init__(self, chef: str):
         self.chef = chef
 
-    @d.on_method(AddIngredients)
+    @listen(AddIngredients)
     def cook(self, affair: AddIngredients) -> dict[str, str]:
         return {"chef": self.chef}
 
-k = Kitchen("Alice")  # cook() 已注册为绑定方法
+k = Kitchen("Alice", dispatcher=d)  # cook() 已注册为绑定方法
 result = d.emit(AddIngredients(ingredients=("egg",)))
 # result == {"chef": "Alice"}
 ```
 
 - `on()` — 立即注册普通函数
-- `on_method()` — 仅标注元数据；`AffairAwareMeta` 元类在 `__init__` 完成后注册绑定方法
+- `listen()` — 仅标注延迟绑定元数据；用于模块级回调和类方法
 
-支持 `@staticmethod` 和 `@classmethod`——放在 `@on_method()` **外层**：
+支持 `@staticmethod` 和 `@classmethod`——放在 `@listen()` **外层**：
 
 ```python
 class Handler(AffairAware):
     @staticmethod
-    @d.on_method(Ping)
+    @listen(Ping)
     def static_handle(affair: Ping) -> dict[str, str]:
         return {"static": "yes"}
 
     @classmethod
-    @d.on_method(Ping)
+    @listen(Ping)
     def class_handle(cls, affair: Ping) -> dict[str, str]:
         return {"cls": cls.__name__}
 ```

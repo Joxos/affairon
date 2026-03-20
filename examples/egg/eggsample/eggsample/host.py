@@ -18,8 +18,7 @@ Run with fairun::
 import itertools
 import random
 
-from affairon import AffairMain, Dispatcher
-from affairon import default_dispatcher as dispatcher
+from affairon import AffairMain, Dispatcher, listen
 from eggsample.affairs import AddIngredients, PrepCondiments
 
 condiments_tray = {
@@ -29,9 +28,9 @@ condiments_tray = {
 }
 
 
-@dispatcher.on(AffairMain)
 def main(affair: AffairMain) -> None:
     """Application entry point, invoked by fairun."""
+    dispatcher: Dispatcher = affair.dispatcher
     cook = EggsellentCook(dispatcher)
     cook.add_ingredients()
     cook.prepare_the_food()
@@ -75,5 +74,16 @@ class EggsellentCook:
             print("\n".join(condiment_comments))
 
 
+@listen(AffairMain)
+def affair_main_entry(affair: AffairMain) -> None:
+    main(affair)
+
+
 if __name__ == "__main__":
-    dispatcher.emit(AffairMain())
+    dispatcher = Dispatcher()
+
+    def _entry(affair):
+        return affair_main_entry(affair)
+
+    dispatcher.register([AffairMain], _entry)
+    dispatcher.emit(AffairMain(dispatcher=dispatcher))

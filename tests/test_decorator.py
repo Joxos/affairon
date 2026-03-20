@@ -1,8 +1,13 @@
-"""Tests for on() and on_method() decorators."""
+"""Tests for on() and listen() decorators."""
 
 from conftest import Ping, Pong
 
-from affairon import AffairAware, Dispatcher
+from affairon import Dispatcher, listen
+
+
+def _msg_is_yes(affair: Ping) -> bool:
+    return affair.msg == "yes"
+
 
 # =============================================================================
 # on() — plain function immediate registration
@@ -23,59 +28,32 @@ class TestDecoratorOn:
         assert result == {"ok": "x"}
 
 
-# =============================================================================
-# on_method() — deferred registration for class methods
-# =============================================================================
+class TestDecoratorListen:
+    def test_listen_stamps_metadata(self):
+        @listen(Ping, Pong)
+        def multi(affair) -> None: ...
 
+        from affairon.listen import get_listen_spec
 
-class TestDecoratorOnMethod:
-    def test_method_defers_registration(self):
-        """on_method() only stamps metadata; registration happens at instantiation."""
-        d = Dispatcher()
+        spec = get_listen_spec(multi)
+        assert spec is not None
+        assert spec.affair_types == [Ping, Pong]
+        assert spec.after is None
+        assert spec.when is None
 
-        class Handler(AffairAware):
-            @d.on_method(Ping)
-            def handle(self, affair: Ping) -> dict[str, str]:
-                return {"handled": affair.msg}
-
-        # Before instantiation: metadata present but not in registry
-        func = Handler.__dict__["handle"]
-        assert hasattr(func, "_affair_types")
-        assert func._affair_types == [Ping]
-        assert func._affair_dispatcher is d
-        assert d.emit(Ping(msg="x")) == {}
-
-        # After instantiation: registered
-        Handler()
-        assert d.emit(Ping(msg="x")) == {"handled": "x"}
-
-    def test_metadata_stamping(self):
-        """on_method() stamps _affair_types, _affair_after, and
-        _affair_dispatcher on the raw function object."""
+    def test_listen_preserves_after_when(self):
         d = Dispatcher()
 
         @d.on(Ping)
         def dep(affair: Ping) -> None: ...
 
-        class H(AffairAware):
-            @d.on_method(Ping, Pong)
-            def multi(self, affair) -> None: ...
+        @listen(Ping, after=[dep], when=_msg_is_yes)
+        def handler(affair: Ping) -> None: ...
 
-            @d.on_method(Ping, after=[dep])
-            def with_after(self, affair: Ping) -> None: ...
+        from affairon.listen import get_listen_spec
 
-            @d.on_method(Ping)
-            def no_after(self, affair: Ping) -> None: ...
-
-        # Multiple affair types
-        multi_fn = H.__dict__["multi"]
-        assert multi_fn._affair_types == [Ping, Pong]
-        assert multi_fn._affair_dispatcher is d
-
-        # after list preserved
-        with_after_fn = H.__dict__["with_after"]
-        assert with_after_fn._affair_after == [dep]
-
-        # after=None when omitted
-        no_after_fn = H.__dict__["no_after"]
-        assert no_after_fn._affair_after is None
+        spec = get_listen_spec(handler)
+        assert spec is not None
+        assert spec.affair_types == [Ping]
+        assert spec.after == [dep]
+        assert spec.when is _msg_is_yes

@@ -1,198 +1,176 @@
-# AGENTS.md — Affairon
+# AGENTS.md - Affairon
 
-Affair-driven framework for Python. Affairs are Pydantic models emitted through dispatchers;
-callbacks register via decorators, return `dict | None`, and results are merged.
+Affairon is a Python framework built around affair dispatch. Affairs are
+Pydantic models, callbacks register on dispatchers, callbacks return
+`dict | None`, and dispatcher output is the merged result.
 
-## Build & Run Commands
+No repo-local Cursor rules (`.cursor/rules/`, `.cursorrules`) or Copilot rules
+(`.github/copilot-instructions.md`) are present in this repository. Treat this
+file as the main guide for coding agents working here.
 
-Package manager: **uv** (with `uv.lock`). Always use `uv run` to execute tools.
+## Baseline
+
+- Python `>=3.12`
+- Package manager and task runner: `uv`
+- Lint and formatting: `ruff`
+- Tests: `pytest` and `pytest-asyncio`
+- Type checking: `pyright`
+- Packaging backend: `hatchling`
+
+This repo is disciplined. Follow existing patterns closely, keep diffs small,
+and preserve public behavior unless the task explicitly changes semantics.
+
+## Verified commands
+
+Run project tools through `uv`.
 
 ```bash
-# Install dependencies (includes dev group)
+# Install runtime and dev dependencies
 uv sync
 
-# Run all tests
+# Run the full test suite
 uv run pytest
 
-# Run a single test file
+# Run one test file
 uv run pytest tests/test_dispatcher.py
 
-# Run a single test by node ID
+# Run one test by node id
 uv run pytest tests/test_dispatcher.py::TestSyncDispatcher::test_emit_single_listener
 
-# Run tests matching a keyword
+# Run tests by keyword
 uv run pytest -k "test_after_ordering"
-
-# Run tests verbose
-uv run pytest -v
 
 # Lint
 uv run ruff check .
 
-# Lint with auto-fix
+# Lint and auto-fix
 uv run ruff check --fix .
 
-# Format check
+# Format check / apply
 uv run ruff format --check .
-
-# Format (apply)
 uv run ruff format .
+
+# Type check
+uv run pyright
 ```
 
-## Project Structure
+There is no repo-specific build command beyond standard Python packaging.
+Validate most changes with targeted tests, `ruff`, and `pyright`.
 
-```
-affairon/              # Main package
-  __init__.py          # Public API, re-exports, default_dispatcher singleton
-  _types.py            # PEP 695 type aliases (SyncCallback, AsyncCallback)
-  affairs.py           # Affair/MutableAffair (Pydantic) data models
-  aware.py             # AffairAware mixin + AffairAwareMeta metaclass
-  base_dispatcher.py   # Abstract BaseDispatcher with on()/on_method()/register()/unregister()
-  dispatcher.py        # Sync Dispatcher (emit executes layers sequentially)
-  async_dispatcher.py  # AsyncDispatcher (same-layer callbacks run concurrently)
-  registry.py          # BaseRegistry — NetworkX dependency graph, exec_order()
-  composer.py          # PluginComposer — entry point + local plugin loading
-  exceptions.py        # Exception hierarchy (all inherit AffairError)
-  utils.py             # merge_dict helper
-  fairun/              # CLI runner subpackage
-    cli.py             # argparse entry point, composes plugins, emits AffairMain
-tests/
-  conftest.py          # Shared test affair types: Ping, Pong, MutablePing
-  test_*.py            # Test modules, one per source module
-examples/              # Example plugin projects
-```
+## Repository map
 
-## Python Version
+- `affairon/__init__.py`: public exports, default dispatcher singletons,
+  `logger.disable("affairon")`
+- `affairon/affairs.py`: `Affair`, `MutableAffair`, meta-affairs, merge strategy
+- `affairon/_types.py`: shared callback type aliases
+- `affairon/listen.py`: delayed-binding metadata for `@listen`
+- `affairon/dispatcher.py` and `async_dispatcher.py`: sync and async dispatch
+- `affairon/registry.py`: dependency graph, ordering, and `when=` filtering
+- `affairon/aware.py`: `AffairAware` binding and cleanup
+- `affairon/composer.py`: plugin discovery, import, and auto-registration
+- `affairon/fairun/cli.py`: `fairun` CLI entry point
+- `tests/`: pytest suite covering sync, async, registry, composer, and aware
+- `examples/`: example plugin projects used by tests and docs
 
-Requires **Python >= 3.12**. Uses modern syntax throughout:
-- PEP 695 `type` statement for type aliases (`type StandardResult[V] = ...`)
-- PEP 695 generic classes (`class BaseRegistry[CB]:`, `class BaseDispatcher[CB]:`)
-- `except*` (ExceptionGroup handling) in async_dispatcher
-- `collections.abc` imports for `Callable`, `Coroutine`
+## Semantics agents must preserve
 
-## Code Style
+- `Affair` is immutable and forbids extra fields.
+- `MutableAffair` is mutable, validates assignment, and also forbids extra
+  fields.
+- Pydantic `ValidationError` is wrapped as `AffairValidationError`.
+- Callback contract is `dict | None`. Returning `None` means no contribution.
+- Default merge behavior is `raise`; supported strategies are `raise`, `keep`,
+  `override`, `list_merge`, and `dict_merge`.
+- `emit_up=False` dispatches only the concrete affair type.
+- `emit_up=True` walks the affair type MRO child-first and also fires callbacks
+  registered on parent affair types.
+- Cross-hierarchy key conflicts still raise `KeyConflictError` under the
+  default merge strategy.
+- `on()` registers plain functions immediately.
+- `listen()` stores metadata and does not register immediately.
+- `AffairAware` registers bound `@listen` methods after instance creation using
+  the dispatcher passed at instantiation, even if subclasses skip
+  `super().__init__()`.
+- `AffairAware` supports explicit `unregister()` cleanup and context-manager
+  lifetime.
+- `after=[callback]` defines dependency order. Unknown dependencies and cycles
+  are validated by the registry.
+- `when=` predicates are stored in the registry and checked at emit time.
+- `AsyncDispatcher` runs same-layer callbacks concurrently with
+  `asyncio.TaskGroup`; async failures may surface as `ExceptionGroup`.
+- Callback failures are routed through `CallbackErrorAffair`.
+- Error-policy keys are `retry`, `deadletter`, and `silent`.
+- Error-affair dispatch intentionally uses `raise` semantics so policy dicts are
+  not wrapped by list or dict merge strategies.
+- Plugin load order matters: local plugins first, external entry-point plugins
+  second.
+- External plugins are discovered from the `affairon.plugins` entry-point group.
+- Local plugins must be module paths, not `module:symbol` targets.
+- Composer only auto-registers callbacks defined in the scanned module; it
+  ignores imported callbacks.
+- `fairun` selects sync or async dispatcher first, composes plugins onto that
+  dispatcher, then emits `AffairMain` on the same dispatcher.
 
-### Ruff Configuration
+## Style and typing conventions
 
-Line length: **88**. Target: **py312**.
+- Group imports as stdlib, third-party, then first-party.
+- Treat `affairon` as the first-party package for import sorting.
+- Prefer `collections.abc` for `Callable`, `Coroutine`, and similar protocols.
+- Use `snake_case` for modules, functions, and methods, `PascalCase` for
+  classes and type aliases, and `UPPER_SNAKE_CASE` for constants.
+- Fully annotate function signatures.
+- Prefer modern typing with builtin generics (`list[...]`, `dict[...]`) and
+  `X | Y` unions.
+- This codebase already uses Python 3.12 features, including PEP 695 `type`
+  aliases and generic syntax. Match that when editing related code.
+- Keep runtime behavior type-safe. Avoid `Any` unless it is already justified by
+  framework boundaries or metaprogramming.
+- Avoid `# type: ignore` unless it is narrowly scoped and genuinely necessary.
+- Ruff lint rules enabled in `pyproject.toml` are `E`, `W`, `F`, `I`, `N`,
+  `UP`, and `B`.
+- Ruff uses the default 88-character line length unless repo config changes.
+- Keep module docstrings short where they exist.
+- Public classes and methods generally use concise Google-style docstrings.
+- Runtime modules commonly bind Loguru once at module scope with
+  `log = logger.bind(source=__name__)`.
+- Affairon logging is disabled by default in `affairon/__init__.py`; enable it
+  with `logger.enable("affairon")` when debugging.
+- Use Loguru `{}` formatting instead of f-strings in logging calls.
+- Prefer helper functions like `callable_name()` when logging callback names.
 
-Enabled rule sets: `E` (pycodestyle errors), `W` (pycodestyle warnings), `F` (pyflakes),
-`I` (isort), `N` (pep8-naming), `UP` (pyupgrade), `B` (flake8-bugbear).
+## Error-handling conventions
 
-isort known-first-party: `["affairon"]`.
+- Framework exceptions inherit from `AffairError`.
+- Wrap external failures with `raise ... from exc`.
+- Do not introduce bare `except:` blocks.
+- Do not swallow broad exceptions unless you are matching an existing cleanup or
+  retry path that clearly requires it.
+- If you touch callback error handling, preserve the current retry -> deadletter
+  -> silent -> re-raise behavior.
 
-### Import Order
+## Testing conventions
 
-Follow isort convention (enforced by ruff `I` rules):
+- Test files are named `test_<module>.py`.
+- Test classes use names like `TestSyncDispatcher` and `TestRegistry`.
+- Tests usually have short one-line docstrings.
+- Shared affair types for tests live in `tests/conftest.py`.
+- Prefer fresh `Dispatcher()` or `AsyncDispatcher()` instances per test.
+- The suite favors real framework objects over mocks.
+- When behavior changes, add or update focused tests near the affected module.
+- If you change dispatch semantics, inspect tests covering `emit_up`, `when`,
+  `after`, merge strategies, plugin loading, and async error handling.
 
-```python
-# 1. stdlib
-import asyncio
-from abc import ABC, abstractmethod
-from collections.abc import Callable, Coroutine
-from typing import Any
+## Practical workflow for agents
 
-# 2. third-party
-import networkx as nx
-from loguru import logger
-from pydantic import BaseModel, ConfigDict
-
-# 3. first-party (affairon)
-from affairon.affairs import MutableAffair
-from affairon.exceptions import CyclicDependencyError
-```
-
-- Use `from` imports for specific names; bare `import` for namespace usage (`import networkx as nx`)
-- Prefer `collections.abc` over `typing` for `Callable`, `Coroutine`, etc.
-- Never use wildcard imports
-
-### Naming Conventions
-
-- **Modules**: `snake_case.py` (e.g., `base_dispatcher.py`, `async_dispatcher.py`)
-- **Classes**: `PascalCase` (e.g., `BaseDispatcher`, `MutableAffair`, `PluginComposer`)
-- **Functions/methods**: `snake_case` (e.g., `exec_order`, `merge_dict`, `compose_from_pyproject`)
-- **Constants**: `UPPER_SNAKE_CASE` (e.g., `ENTRY_POINT_GROUP`)
-- **Private attributes**: `_single_underscore` prefix (e.g., `_guardian`, `_registry`, `_graphs`)
-- **Internal modules**: `_underscore` prefix (e.g., `_types.py`)
-- **Type aliases**: `PascalCase` via `type` statement (e.g., `type SyncCallback = ...`)
-
-### Type Annotations
-
-- **All** function signatures must have full type annotations (params + return)
-- Use PEP 695 `type` statement for type aliases (not `TypeAlias`)
-- Use PEP 695 generic syntax for generic classes (`class Foo[T]:`)
-- Use `X | Y` union syntax (not `Union[X, Y]`)
-- Use `list[...]`, `dict[...]`, `set[...]` (lowercase builtins, not `typing.List`)
-- `Any` from `typing` is acceptable for truly dynamic values
-- Never suppress type errors with `# type: ignore` unless necessary for dynamic attribute stamping
-  (the codebase uses `# type: ignore[attr-defined]` only in `on_method()` for metaprogramming)
-
-### Docstrings
-
-Google-style with sections. Every module, class, and public method has a docstring.
-
-```python
-def emit(self, affair: MutableAffair) -> dict[str, Any]:
-    """Synchronously dispatch affair.
-
-    Args:
-        affair: MutableAffair to dispatch.
-
-    Returns:
-        Merged dict of all listener results.
-
-    Raises:
-        TypeError: If listener returns non-dict value.
-        KeyConflictError: If merging dicts causes key conflict.
-    """
-```
-
-Module docstrings are short, one-paragraph descriptions at file top.
-Class docstrings describe purpose; include `Attributes:` section when fields are non-obvious.
-
-### Error Handling
-
-- All custom exceptions inherit from `AffairError` (base exception in `exceptions.py`)
-- Wrap external errors into framework-specific types (e.g., `ValidationError` -> `AffairValidationError`)
-- Use `raise X from exc` to chain exceptions
-- Specific exception subclasses for each error domain: `PluginNotFoundError`, `PluginVersionError`, `PluginImportError`, etc.
-- Never use bare `except:` — always catch specific types
-- Logging uses `loguru`.  Every module creates a bound logger at module
-  scope: `log = logger.bind(source=__name__)`.  All affairon logging is
-  disabled by default via `logger.disable("affairon")` in `__init__.py`;
-  users opt in with `logger.enable("affairon")`.
-- Use loguru's native `{}` placeholder formatting (not f-strings) so that
-  string construction is deferred until the log is actually emitted.
-- Use `callable_name()` from `utils.py` instead of `callback.__qualname__`
-  in log arguments to avoid `AttributeError` on exotic callables.
-- Log levels reflect the event faithfully: DEBUG for routine operations
-  (emit, registration, binding), INFO for milestones (plugin loaded, app
-  started), ERROR/`.exception()` for real failures.  Do not duplicate
-  exception text in `.exception()` messages — the traceback is attached
-  automatically.
-- Avoid trace-level or per-callback-invocation logs.
-
-### Class Patterns
-
-- Pydantic `BaseModel` subclasses for data (affairs). Use `ConfigDict(frozen=True)` for immutability.
-- ABC for abstract base classes (e.g., `BaseDispatcher`)
-- Metaclass (`AffairAwareMeta`) for automatic callback registration
-- Generic classes with PEP 695 syntax (`class BaseDispatcher[CB](ABC):`)
-- `MutableAffair.emit_up` (`bool`, default `False`): when `True`, `emit()` walks the affair's MRO
-  (child-first) and also fires callbacks registered on parent affair types. The same instance is
-  passed to all callbacks (type-safe via Liskov substitution). Cross-hierarchy key conflicts raise
-  `KeyConflictError` by design.
-
-## Testing Conventions
-
-Framework: **pytest** with **pytest-asyncio** (`asyncio_mode = "auto"`).
-
-- Test files: `test_<module>.py` — mirror source modules
-- Test classes: `Test<Feature>` — group related tests (e.g., `TestSyncDispatcher`, `TestRegistry`)
-- Test functions: `test_<behavior>` — descriptive names (e.g., `test_emit_key_conflict`)
-- Each test has a one-line docstring explaining the assertion
-- Shared fixtures/types in `tests/conftest.py` (Ping, Pong, MutablePing affairs)
-- Use `pytest.raises(ExceptionType)` for expected errors
-- Create fresh `Dispatcher()` instances per test (no shared state)
-- Async tests: `@pytest.mark.asyncio` decorator + `async def`
-- No mocking — tests use real dispatcher/registry instances
+1. Read the affected module and its matching tests first.
+2. Preserve existing public semantics unless the task says otherwise.
+3. Make the smallest change that solves the problem.
+4. Run the narrowest useful test first, then broader validation.
+5. Preferred validation order:
+   - related test file or node id
+   - `uv run ruff check .`
+   - `uv run ruff format --check .`
+   - `uv run pyright`
+   - `uv run pytest`
+6. If a broader command fails because of a pre-existing issue, call that out
+   separately instead of folding it into your change.

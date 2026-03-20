@@ -33,8 +33,10 @@ from affairon.exceptions import (
     PluginError,
     PluginImportError,
     PluginNotFoundError,
+    PluginTargetError,
     PluginVersionError,
 )
+from affairon.listen import listen
 
 # Module-level default dispatcher singletons
 default_dispatcher = Dispatcher()
@@ -56,6 +58,7 @@ __all__ = [
     "AsyncDispatcher",
     "default_dispatcher",
     "default_async_dispatcher",
+    "listen",
     # Exception classes
     "AffairError",
     "AffairValidationError",
@@ -66,4 +69,5 @@ __all__ = [
     "PluginVersionError",
     "PluginEntryPointError",
     "PluginImportError",
+    "PluginTargetError",
 ]

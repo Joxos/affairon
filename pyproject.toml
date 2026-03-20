@@ -45,6 +45,9 @@ asyncio_mode = "auto"
 
 [tool.pyright]
 exclude = ["**/.venv"]
+extraPaths = [
+    "examples/egg/eggsample",
+]
 
 [dependency-groups]
 dev = [
@@ -53,4 +56,3 @@ dev = [
     "ruff>=0.1.0",
     "pyright>=1.1.408",
 ]
-

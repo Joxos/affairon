@@ -82,14 +82,17 @@ result = dispatcher.emit(AddIngredients(ingredients=("egg",)))
 
 ---
 
-## Plugin System
+## Plugin system
 
-Affairon supports two kinds of plugins, both declared in `pyproject.toml`:
+Affairon supports two plugin sources, both declared in `pyproject.toml`:
 
-### External Plugins (Entry Points)
+### External plugins (entry points)
 
-External packages register via the `affairon.plugins` entry point group.
-The host application lists them under `[tool.affairon] plugins` using PEP 508 requirement strings:
+External packages register in the `affairon.plugins` entry point group.
+The entry point target can be any symbol in the plugin module; affairon imports
+the module and auto-registers module-level callbacks decorated with `@listen`.
+
+The host application lists packages under `[tool.affairon] plugins` using PEP 508 requirement strings:
 
 ```toml
 # Host's pyproject.toml
@@ -100,26 +103,31 @@ plugins = ["my-plugin>=1.0"]
 ```toml
 # Plugin's pyproject.toml
 [project.entry-points."affairon.plugins"]
-my-plugin = "my_plugin.lib"
+my-plugin = "my_plugin.lib:any_symbol"
 ```
 
-### Local Plugins (Direct Import)
+### Local plugins (module import)
 
 Modules within the host application itself can be declared via `local_plugins`.
-They are imported directly, triggering callback registration through decorators:
+Each item must be a module path:
 
 ```toml
 [tool.affairon]
 local_plugins = ["myapp.lib", "myapp.host"]
 ```
 
-**Load order**: external plugins first, local plugins second.
+At compose time affairon imports each module and auto-registers only callbacks
+defined in that module (imported callbacks are ignored to avoid duplicate registration).
+
+**Load order**: local plugins first, external plugins second. This lets host
+callbacks exist before external extensions reference them with `after=[...]`.
 
 ---
 
 ## CLI Runner — `fairun`
 
-`fairun` is a built-in CLI that reads `pyproject.toml`, composes all plugins, and emits an `AffairMain` affair to start the application:
+`fairun` is a built-in CLI that reads `pyproject.toml`, selects the dispatcher,
+composes all plugins on that dispatcher, and emits `AffairMain` on the same dispatcher:
 
 ```bash
 fairun /path/to/project
@@ -136,24 +144,27 @@ fairun --async /path/to/project
 Applications define their entry point by listening on `AffairMain`:
 
 ```python
-from affairon import AffairMain, default_dispatcher as dispatcher
+from affairon import AffairMain
+from affairon.listen import listen
 
-@dispatcher.on(AffairMain)
+@listen(AffairMain)
 def main(affair: AffairMain) -> None:
     print(f"Running from {affair.project_path}")
+# affair.dispatcher is the selected dispatcher instance.
 ```
 
 ---
 
-## Class-Based Handlers — `AffairAware`
+## Class-based handlers - `AffairAware`
 
 For class-based callback organization, inherit from `AffairAware`.
-Use `on_method()` (instead of `on()`) for class methods — they are
-automatically registered as bound callbacks when the class is instantiated.
-No `super().__init__()` call required:
+Use `@listen` on class methods and pass `dispatcher=` at instantiation.
+Bound callbacks are registered automatically after `__init__` completes, and
+`super().__init__()` is still not required:
 
 ```python
 from affairon import AffairAware, Dispatcher
+from affairon.listen import listen
 
 d = Dispatcher()
 
@@ -161,29 +172,29 @@ class Kitchen(AffairAware):
     def __init__(self, chef: str):
         self.chef = chef
 
-    @d.on_method(AddIngredients)
+    @listen(AddIngredients)
     def cook(self, affair: AddIngredients) -> dict[str, str]:
         return {"chef": self.chef}
 
-k = Kitchen("Alice")  # cook() is now a registered bound method
+k = Kitchen("Alice", dispatcher=d)  # cook() is now registered as a bound method
 result = d.emit(AddIngredients(ingredients=("egg",)))
 # result == {"chef": "Alice"}
 ```
 
 - `on()` — registers a plain function immediately
-- `on_method()` — stamps metadata only; the `AffairAwareMeta` metaclass registers the bound method after `__init__` completes
+- `listen()` — stamps delayed-binding metadata for module-level callbacks and class methods
 
-`@staticmethod` and `@classmethod` are supported — place them **outside** `@on_method()`:
+`@staticmethod` and `@classmethod` are supported - place them **outside** `@listen()`:
 
 ```python
 class Handler(AffairAware):
     @staticmethod
-    @d.on_method(Ping)
+    @listen(Ping)
     def static_handle(affair: Ping) -> dict[str, str]:
         return {"static": "yes"}
 
     @classmethod
-    @d.on_method(Ping)
+    @listen(Ping)
     def class_handle(cls, affair: Ping) -> dict[str, str]:
         return {"cls": cls.__name__}
 ```

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from affairon.affairs import MutableAffair
 from affairon.registry import BaseRegistry
@@ -37,9 +37,7 @@ class BaseDispatcher[CB](ABC):
     ) -> Callable[[Callable[[A], R]], Callable[[A], R]]:
         """Decorator to register a plain function as listener.
 
-        Registers the callback immediately.  For class methods, use
-        :meth:`on_method` instead so the bound method is registered at
-        instantiation time via :class:`AffairAwareMeta`.
+        Registers the callback immediately.
 
         Args:
             affair_types: MutableAffair types to listen for.
@@ -59,50 +57,14 @@ class BaseDispatcher[CB](ABC):
         """
 
         def decorator(func: Callable[[A], R]) -> Callable[[A], R]:
+            cb = cast(CB, func)
+            after_cbs = cast(list[CB] | None, after)
             self.register(
                 list(affair_types),
-                func,
-                after=after,
+                cb,
+                after=after_cbs,
                 when=when,  # type: ignore[arg-type]
             )
-            return func
-
-        return decorator
-
-    def on_method[A: MutableAffair, F: Callable[..., Any]](
-        self,
-        *affair_types: type[A],
-        after: list[Any] | None = None,
-        when: Callable[[A], bool] | None = None,
-    ) -> Callable[[F], F]:
-        """Decorator to mark a class method for deferred registration.
-
-        Does **not** register the callback.  Instead it stamps metadata
-        on the unbound function so that :class:`AffairAwareMeta` can
-        register the *bound* method when the owning class is instantiated.
-
-        Must be used inside an :class:`AffairAware` subclass.
-
-        Args:
-            affair_types: MutableAffair types to listen for.
-            after: List of callbacks that must execute before this one.
-            when: Optional predicate; callback fires only when
-                ``when(affair)`` returns True.
-
-        Returns:
-            Decorator function that returns the original function unchanged.
-
-        Post:
-            ``_affair_types``, ``_affair_after``, ``_affair_dispatcher``,
-            ``_affair_when`` stamped on the function for later consumption
-            by the metaclass.
-        """
-
-        def decorator(func: F) -> F:
-            func._affair_types = list(affair_types)  # type: ignore[attr-defined]
-            func._affair_after = after  # type: ignore[attr-defined]
-            func._affair_dispatcher = self  # type: ignore[attr-defined]
-            func._affair_when = when  # type: ignore[attr-defined]
             return func
 
         return decorator

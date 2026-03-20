@@ -79,3 +79,12 @@ class PluginImportError(PluginError):
     raises an exception during import. The original exception is chained
     via ``__cause__``.
     """
+
+
+class PluginTargetError(PluginError):
+    """Plugin target declaration is invalid.
+
+    Raised when plugin configuration points to an unsupported target form,
+    such as using local ``module:function`` syntax after the move to
+    module-based listener discovery.
+    """

@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.entry-points."affairon.plugins"]
-eggsample-spam = "eggsample_spam.lib"
+eggsample-spam = "eggsample_spam.lib:anything"
 
 [tool.uv.sources]
 affairon = { path = "../../../", editable = true }

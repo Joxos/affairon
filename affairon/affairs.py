@@ -113,11 +113,12 @@ class AffairMain(MetaAffair):
     """Meta-affair emitted by fairun to start the application.
 
     The CLI runner ``fairun`` reads ``pyproject.toml``, composes plugins,
-    then emits this affair on the default dispatcher.  User applications
-    register a callback on ``AffairMain`` to define their entry point.
+    then emits this affair on the selected dispatcher. User applications
+    register callbacks on ``AffairMain`` via ``@listen`` callbacks.
 
     Attributes:
         project_path: Resolved path to the project directory.
     """
 
     project_path: Path = Path(".").resolve()
+    dispatcher: Any

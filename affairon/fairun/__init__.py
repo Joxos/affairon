@@ -2,7 +2,8 @@
 
 Reads ``[tool.affairon]`` from a project's ``pyproject.toml``,
 composes external and local plugins, then emits :class:`AffairMain`
-on the default dispatcher to start the application.
+on the selected dispatcher (sync by default, async with ``--async``)
+to start the application.
 
 Usage::
 

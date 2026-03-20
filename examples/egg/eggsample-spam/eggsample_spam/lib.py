@@ -1,10 +1,10 @@
 from eggsample.affairs import AddIngredients, PrepCondiments
 from eggsample.lib import base_condiments
 
-from affairon import default_dispatcher as dispatcher
+from affairon import listen
 
 
-@dispatcher.on(AddIngredients)
+@listen(AddIngredients)
 def spam_plugin(affair: AddIngredients) -> dict[str, list[str]]:
     """Here the caller expects us to return a list."""
     if "egg" in affair.ingredients:
@@ -14,9 +14,7 @@ def spam_plugin(affair: AddIngredients) -> dict[str, list[str]]:
     return {"ingredients_spam": spam}
 
 
-@dispatcher.on(
-    PrepCondiments, after=[base_condiments]
-)  # Pluggy uses LIFO. Here we explicitly specify the order.
+@listen(PrepCondiments, after=[base_condiments])
 def spam_sauce(affair: PrepCondiments) -> dict[str, str]:
     """Here the caller passes a mutable object, so we mess with it directly."""
     try:

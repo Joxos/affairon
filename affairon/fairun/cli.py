@@ -1,7 +1,8 @@
 """CLI entry point for fairun.
 
 Parses the project path from command-line arguments, discovers
-``pyproject.toml``, composes plugins, and emits ``AffairMain``.
+``pyproject.toml``, selects dispatcher mode, composes plugins on that
+dispatcher, and emits ``AffairMain``.
 """
 
 import argparse
@@ -61,15 +62,17 @@ def main(argv: list[str] | None = None) -> None:
         log.error("No pyproject.toml found in {}", project_path)
         sys.exit(1)
 
-    # Compose plugins from pyproject.toml
-    composer = PluginComposer()
-    composer.compose_from_pyproject(pyproject_path)
-
-    affair = AffairMain(project_path=project_path)
-
     if args.use_async:
+        dispatcher = default_async_dispatcher
+        composer = PluginComposer(dispatcher)
+        composer.compose_from_pyproject(pyproject_path)
+        affair = AffairMain(project_path=project_path, dispatcher=dispatcher)
         log.info("Starting application (async) from {}", project_path)
-        asyncio.run(default_async_dispatcher.emit(affair))
+        asyncio.run(dispatcher.emit(affair))
     else:
+        dispatcher = default_dispatcher
+        composer = PluginComposer(dispatcher)
+        composer.compose_from_pyproject(pyproject_path)
+        affair = AffairMain(project_path=project_path, dispatcher=dispatcher)
         log.info("Starting application from {}", project_path)
-        default_dispatcher.emit(affair)
+        dispatcher.emit(affair)
