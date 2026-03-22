@@ -7,7 +7,7 @@ from conftest import Ping
 
 from affairon import Dispatcher, listen
 from affairon.composer import PluginComposer
-from affairon.exceptions import PluginTargetError
+from affairon.exceptions import PluginConfigError, PluginTargetError
 
 
 def _unregistered_dependency(affair):
@@ -105,6 +105,126 @@ class TestPluginComposer:
             "local:['app.lib', 'app.host']",
             "ext:['ext>=1.0']",
         ]
+
+    def test_compose_from_pyproject_profile_loads_local_then_external(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "\n".join(
+                [
+                    "[tool.affairon]",
+                    'local_plugins = ["app.main"]',
+                    "",
+                    "[tool.affairon.profiles.kernel]",
+                    'plugins = ["ext>=2.0"]',
+                    'local_plugins = ["kernel.bridge", "kernel.host"]',
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        composer = PluginComposer(Dispatcher())
+        events: list[str] = []
+
+        monkeypatch.setattr(
+            composer, "compose", lambda reqs: events.append(f"ext:{reqs}")
+        )
+        monkeypatch.setattr(
+            composer,
+            "compose_local",
+            lambda targets: events.append(f"local:{targets}"),
+        )
+
+        composer.compose_from_pyproject(pyproject, profile="kernel")
+
+        assert events == [
+            "local:['kernel.bridge', 'kernel.host']",
+            "ext:['ext>=2.0']",
+        ]
+
+    def test_compose_from_pyproject_raises_for_missing_profile(
+        self,
+        tmp_path: Path,
+    ):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("[tool.affairon]\n", encoding="utf-8")
+
+        composer = PluginComposer(Dispatcher())
+
+        with pytest.raises(PluginConfigError, match="Profile 'kernel' not found"):
+            composer.compose_from_pyproject(pyproject, profile="kernel")
+
+    @pytest.mark.parametrize(
+        ("config_line", "match"),
+        [
+            ('plugins = "ext>=1.0"', "plugins"),
+            ('local_plugins = ["kernel.host", 1]', "local_plugins"),
+        ],
+    )
+    def test_compose_from_pyproject_raises_for_invalid_profile_plugin_lists(
+        self,
+        tmp_path: Path,
+        config_line: str,
+        match: str,
+    ):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "\n".join(
+                [
+                    "[tool.affairon.profiles.kernel]",
+                    config_line,
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        composer = PluginComposer(Dispatcher())
+
+        with pytest.raises(PluginConfigError, match=match):
+            composer.compose_from_pyproject(pyproject, profile="kernel")
+
+    def test_compose_from_pyproject_raises_for_invalid_toml(self, tmp_path: Path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text("[tool.affairon\n", encoding="utf-8")
+
+        composer = PluginComposer(Dispatcher())
+
+        with pytest.raises(PluginConfigError, match="Failed to parse pyproject"):
+            composer.compose_from_pyproject(pyproject)
+
+    def test_compose_from_pyproject_empty_profile_is_noop(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "\n".join(
+                [
+                    "[tool.affairon.profiles.kernel]",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        composer = PluginComposer(Dispatcher())
+        events: list[str] = []
+
+        monkeypatch.setattr(
+            composer, "compose", lambda reqs: events.append(f"ext:{reqs}")
+        )
+        monkeypatch.setattr(
+            composer,
+            "compose_local",
+            lambda targets: events.append(f"local:{targets}"),
+        )
+
+        composer.compose_from_pyproject(pyproject, profile="kernel")
+
+        assert events == []
 
     def test_only_module_defined_functions_are_auto_registered(self, monkeypatch):
         dispatcher = Dispatcher()
