@@ -10,6 +10,7 @@ from packaging.requirements import Requirement
 from packaging.version import Version
 
 from affairon.exceptions import (
+    PluginConfigError,
     PluginEntryPointError,
     PluginImportError,
     PluginNotFoundError,
@@ -22,6 +23,12 @@ from affairon.utils import normalize_name
 log = logger.bind(source=__name__)
 
 ENTRY_POINT_GROUP = "affairon.plugins"
+
+
+def _config_section_name(profile: str | None) -> str:
+    if profile is None:
+        return "[tool.affairon]"
+    return f"[tool.affairon.profiles.{profile}]"
 
 
 def _validate_listener_mode(dispatcher: Any, callback: Any) -> None:
@@ -60,16 +67,44 @@ class PluginComposer:
             self.loaded_local_plugins.add(module_path)
             log.info("Local plugin '{}' loaded", module_path)
 
-    def compose_from_pyproject(self, pyproject_path: Path) -> None:
-        with open(pyproject_path, "rb") as fh:
-            config = tomllib.load(fh)
+    def compose_from_pyproject(
+        self, pyproject_path: Path, profile: str | None = None
+    ) -> None:
+        try:
+            with pyproject_path.open("rb") as fh:
+                config = tomllib.load(fh)
+        except tomllib.TOMLDecodeError as err:
+            raise PluginConfigError(
+                f"Failed to parse pyproject.toml '{pyproject_path}': {err}"
+            ) from err
 
-        affairon_config = config.get("tool", {}).get("affairon", {})
-        plugin_reqs: list[str] = affairon_config.get("plugins", [])
-        local_plugins: list[str] = affairon_config.get("local_plugins", [])
+        affairon_config = self._resolve_affairon_config(
+            config,
+            pyproject_path=pyproject_path,
+            profile=profile,
+        )
+        plugin_reqs = self._read_plugin_list(
+            affairon_config,
+            key="plugins",
+            pyproject_path=pyproject_path,
+            profile=profile,
+        )
+        local_plugins = self._read_plugin_list(
+            affairon_config,
+            key="local_plugins",
+            pyproject_path=pyproject_path,
+            profile=profile,
+        )
 
         if not plugin_reqs and not local_plugins:
-            log.info("No plugins declared in {}", pyproject_path)
+            if profile is None:
+                log.info("No plugins declared in {}", pyproject_path)
+            else:
+                log.info(
+                    "No plugins declared in {} for profile '{}'",
+                    pyproject_path,
+                    profile,
+                )
             return
 
         if local_plugins:
@@ -77,6 +112,66 @@ class PluginComposer:
 
         if plugin_reqs:
             self.compose(plugin_reqs)
+
+    def _resolve_affairon_config(
+        self,
+        config: dict[str, Any],
+        *,
+        pyproject_path: Path,
+        profile: str | None,
+    ) -> dict[str, Any]:
+        tool_config = config.get("tool", {})
+        if not isinstance(tool_config, dict):
+            raise PluginConfigError(f"[tool] in '{pyproject_path}' must be a table")
+
+        affairon_config = tool_config.get("affairon", {})
+        if not isinstance(affairon_config, dict):
+            raise PluginConfigError(
+                f"[tool.affairon] in '{pyproject_path}' must be a table"
+            )
+
+        if profile is None:
+            return affairon_config
+
+        profiles = affairon_config.get("profiles")
+        if profiles is None:
+            raise PluginConfigError(
+                f"Profile '{profile}' not found in '{pyproject_path}'"
+            )
+        if not isinstance(profiles, dict):
+            raise PluginConfigError(
+                f"[tool.affairon.profiles] in '{pyproject_path}' must be a table"
+            )
+
+        profile_config = profiles.get(profile)
+        if profile_config is None:
+            raise PluginConfigError(
+                f"Profile '{profile}' not found in '{pyproject_path}'"
+            )
+        if not isinstance(profile_config, dict):
+            raise PluginConfigError(
+                f"{_config_section_name(profile)} in '{pyproject_path}' must be a table"
+            )
+
+        return profile_config
+
+    def _read_plugin_list(
+        self,
+        affairon_config: dict[str, Any],
+        *,
+        key: str,
+        pyproject_path: Path,
+        profile: str | None,
+    ) -> list[str]:
+        value = affairon_config.get(key, [])
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            raise PluginConfigError(
+                f"{_config_section_name(profile)}.{key} in '{pyproject_path}' "
+                "must be a list of strings"
+            )
+        return value
 
     def _load_plugin(self, requirement: Requirement) -> None:
         plugin_name = requirement.name

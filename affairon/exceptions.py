@@ -81,6 +81,10 @@ class PluginImportError(PluginError):
     """
 
 
+class PluginConfigError(PluginError):
+    pass
+
+
 class PluginTargetError(PluginError):
     """Plugin target declaration is invalid.
 
