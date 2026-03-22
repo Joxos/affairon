@@ -110,6 +110,35 @@ local_plugins = ["myapp.lib", "myapp.host"]
 **加载顺序**：先加载本地插件，再加载外部插件。这样宿主回调会先注册好，
 外部扩展才能安全地通过 `after=[...]` 依赖它们。
 
+### 配置 profiles（命名插件组）
+
+拥有多个 dispatcher 实例的应用常常需要为每个实例选择不同的插件组合。
+Profiles 允许你在同一个 `pyproject.toml` 中声明多个命名组，再在组装时精确选中一个。
+
+```toml
+[tool.affairon]
+local_plugins = ["myapp.main"]
+
+[tool.affairon.profiles.duel]
+local_plugins = ["duel_core.mr2020"]
+
+[tool.affairon.profiles.kernel]
+local_plugins = [
+  "duel_core.kernel.bridges",
+  "duel_core.kernel.planners",
+  "duel_core.kernel.appliers",
+]
+```
+
+`PluginComposer.compose_from_pyproject(pyproject, profile=None)` 精确选择一段配置：
+
+- `profile=None`（默认）— 读取 `[tool.affairon]`，行为与以往完全一致
+- `profile="kernel"` — 仅读取 `[tool.affairon.profiles.kernel]`
+- 请求不存在的 profile 会抛出 `PluginConfigError`
+
+被选中的配置段遵循与根表相同的加载顺序：先本地插件，再外部插件。
+根配置与 profile 之间不发生继承或合并。
+
 ---
 
 ## CLI 运行器 — `fairun`

@@ -122,6 +122,159 @@ defined in that module (imported callbacks are ignored to avoid duplicate regist
 **Load order**: local plugins first, external plugins second. This lets host
 callbacks exist before external extensions reference them with `after=[...]`.
 
+### Profiles (named plugin groups)
+
+Applications with multiple dispatcher instances often need different plugin
+combinations for each instance. Profiles let you declare several named groups
+in one `pyproject.toml` and select one at compose time.
+
+```toml
+[tool.affairon]
+local_plugins = ["myapp.main"]
+
+[tool.affairon.profiles.duel]
+local_plugins = ["duel_core.mr2020"]
+
+[tool.affairon.profiles.kernel]
+local_plugins = [
+  "duel_core.kernel.bridges",
+  "duel_core.kernel.planners",
+  "duel_core.kernel.appliers",
+]
+```
+
+`PluginComposer.compose_from_pyproject(pyproject, profile=None)` selects exactly
+one configuration section:
+
+- `profile=None` (default) — reads `[tool.affairon]`, preserving existing behaviour
+- `profile="kernel"` — reads only `[tool.affairon.profiles.kernel]`
+- requesting a missing profile raises `PluginConfigError`
+
+The selected section follows the same load order as the root table:
+local plugins first, then external plugins. No inheritance or merging occurs
+between the root section and a selected profile.
+
+---
+
+## Migrating from pluggy
+
+Affairon can cover the same basic host/plugin flow as
+[pluggy](https://pluggy.readthedocs.io/), but it models the seam differently.
+Pluggy is centered on named hook specs and hook implementations. Affairon is
+centered on typed affair objects: the seam is a Pydantic model, listeners attach
+to that model, and `emit()` returns the merged output of all listeners.
+
+If you want a concrete example, see `examples/egg/`, which rewrites pluggy's
+first `eggsample` example in affairon. From `examples/egg/eggsample/`, run:
+
+```bash
+uv run fairun .
+```
+
+### Concept map
+
+| pluggy | affairon |
+| --- | --- |
+| `Hookspec` | `Affair` / `MutableAffair` class |
+| `@hookimpl` | `@listen(AffairClass)`, `@dispatcher.on(AffairClass)`, or an `AffairAware` method |
+| `PluginManager.register(...)` | `dispatcher.register(...)` or decorator-based registration |
+| `pm.hook.my_hook(...)` | `dispatcher.emit(MyAffair(...))` |
+| setuptools entry-point loading | `[tool.affairon] plugins` + `affairon.plugins` entry points |
+| in-process plugin modules | `[tool.affairon] local_plugins` |
+| `tryfirst` / `trylast` | `after=[...]` dependency ordering |
+| mutating hook arguments | `MutableAffair` fields |
+
+### What changes in practice
+
+#### 1. Turn hook specs into affair classes
+
+In pluggy, the contract is a function signature. In affairon, the contract is a
+typed model.
+
+```python
+# pluggy
+@hookspec
+def add_ingredients(ingredients): ...
+
+# affairon
+from affairon import Affair
+
+class AddIngredients(Affair):
+    ingredients: tuple[str, ...]
+```
+
+Use `Affair` for immutable input. Use `MutableAffair` when listeners are meant
+to update fields in place.
+
+#### 2. Turn hook implementations into listeners
+
+Replace `@hookimpl` with `@listen(...)` or `@dispatcher.on(...)`. A listener
+returns `dict | None`; the dispatcher merges all returned dictionaries.
+
+```python
+from affairon import listen
+
+@listen(AddIngredients)
+def add_spam(affair: AddIngredients) -> dict[str, list[str]]:
+    return {"ingredients_spam": ["lovely spam", "wonderous spam"]}
+```
+
+For class-based plugins, `AffairAware` gives you a class container for bound
+listeners.
+
+#### 3. Replace hook calls with `emit()`
+
+Pluggy usually gives the host a list of results. Affairon gives the host a
+merged dictionary, so the host becomes explicit about how to combine listener
+contributions.
+
+```python
+result = dispatcher.emit(AddIngredients(ingredients=("egg",)))
+items = [item for values in result.values() for item in values]
+```
+
+This is the main mental shift: listeners collaborate on a seam, and the host
+decides how to consume the merged result.
+
+#### 4. Move plugin wiring into `pyproject.toml`
+
+Instead of manually building a `PluginManager`, declare local and external
+plugins in `[tool.affairon]` and let `fairun` compose them.
+
+```toml
+[tool.affairon]
+plugins = ["my-plugin>=1.0"]
+local_plugins = ["myapp.lib", "myapp.host"]
+```
+
+`fairun` reads `pyproject.toml`, composes the configured plugins onto the chosen
+dispatcher, and emits `AffairMain` to start the application.
+
+#### 5. Re-think ordering and conditions
+
+Pluggy's `tryfirst` / `trylast` are priority hints. Affairon uses explicit
+dependency ordering with `after=[...]`, plus `when=` predicates for conditional
+execution.
+
+If your pluggy setup has simple ordering rules, `after=[...]` is usually enough.
+If it has complex wrapper-style control flow, treat the migration as a redesign,
+not a search-and-replace.
+
+### Notes for pluggy users
+
+- You usually do not need an `optionalhook` equivalent. In affairon, a listener
+  simply does not register for a seam it does not implement.
+- `MutableAffair` is the place for shared mutable state. Standard `Affair`
+  instances stay immutable.
+- `when=` and `emit_up=True` are worth using during migration. They often let
+  you replace pluggy-side conditional logic with cleaner dispatcher behavior.
+- `AsyncDispatcher` is the async path. Same-layer listeners run concurrently
+  once their ordering constraints are satisfied.
+- Some pluggy features do not have a documented 1:1 affairon counterpart today,
+  especially wrapper-style hooks, historic calls, and first-result semantics.
+  When you depend on those, migrate the behavior intentionally instead of trying
+  to mirror pluggy's API shape.
+
 ---
 
 ## CLI Runner — `fairun`
