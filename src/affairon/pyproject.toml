@@ -1,0 +1,33 @@
+[project]
+name = "affairon"
+version = "0.1.0"
+description = "A flexible affair-driven framework for Python supporting both sync and async modes"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Joxos" }
+]
+dependencies = [
+    "pydantic>=2.0",
+    "loguru>=0.7",
+    "networkx>=3.6.1",
+    "packaging>=23.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+fairun = "affairon.fairun.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["affairon"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "affairon",
+    "README.md",
+    "README_cn.md",
+]

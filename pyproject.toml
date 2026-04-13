@@ -1,58 +1,45 @@
-[project]
-name = "affairon"
-version = "0.1.0"
-description = "A flexible affair-driven framework for Python supporting both sync and async modes"
-readme = "README.md"
-requires-python = ">=3.12"
-license = { text = "MIT" }
-authors = [
-    { name = "Joxos" }
-]
-dependencies = [
-    "pydantic>=2.0",
-    "loguru>=0.7",
-    "networkx>=3.6.1",
-    "packaging>=23.0",
-]
+[tool.ruff]
+target-version = "py312"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.uv]
+package = false
 
-[project.scripts]
-fairun = "affairon.fairun.cli:main"
+[tool.uv.workspace]
+members = ["src/affairon", "src/conceron"]
+exclude = ["src/affairon/examples", "src/conceron/examples"]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.408",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.1.0",
+]
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "N",   # pep8-naming
-    "UP",  # pyupgrade
-    "B",   # flake8-bugbear
+    "E",
+    "W",
+    "F",
+    "I",
+    "N",
+    "UP",
+    "B",
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["affairon"]
+known-first-party = ["affairon", "conceron"]
 
 [tool.ruff.lint.per-file-ignores]
-"affairon/__init__.py" = ["E402"]  # logger.disable() must precede package imports
+"src/affairon/affairon/__init__.py" = ["E402"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["src/affairon/tests"]
 asyncio_mode = "auto"
 
 [tool.pyright]
 exclude = ["**/.venv"]
 extraPaths = [
-    "examples/egg/eggsample",
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.1.0",
-    "pyright>=1.1.408",
+    "src/affairon/tests",
+    "src/affairon/examples/egg/eggsample",
 ]
