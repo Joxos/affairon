@@ -1,0 +1,11 @@
+[project]
+name = "duelsample"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["affairon"]
+
+[tool.uv.sources]
+affairon = { path = "../../../", editable = true }
+
+[tool.affairon]
+local_plugins = ["duelsample.host"]
