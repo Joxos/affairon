@@ -1,6 +1,5 @@
 # Seamverse
 
-Seamverse is the umbrella workspace for Affairon and Conceron.
+Seamverse is currently centered on Affairon.
 
-- `src/affairon`: affair-driven dispatch and plugin composition
-- `src/conceron`: concern-driven runtime composition and annotation-guided injection
+- `src/affairon`: affair-driven dispatch, plugin composition, node routing, generated associated affairs, and injection primitives

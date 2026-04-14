@@ -1,9 +1,8 @@
 # AGENTS.md - Seamverse
 
-Seamverse is a uv workspace containing multiple Python subprojects.
+Seamverse is a uv workspace centered on the Affairon Python package.
 
 - `src/affairon/`: the Affairon package and its docs, tests, and examples
-- `src/conceron/`: the Conceron package
 
 No repo-local Cursor rules (`.cursor/rules/`, `.cursorrules`) or Copilot rules
 (`.github/copilot-instructions.md`) are present in this repository. Treat this
@@ -51,8 +50,6 @@ uv run --package affairon fairun --help
 - `src/affairon/affairon/`: Affairon source package
 - `src/affairon/tests/`: Affairon test suite
 - `src/affairon/examples/`: Affairon example projects
-- `src/conceron/pyproject.toml`: Conceron package metadata
-- `src/conceron/conceron/`: Conceron source package
 
 ## Practical workflow for agents
 
@@ -68,3 +65,9 @@ uv run --package affairon fairun --help
    - `uv run pytest`
 6. If a broader command fails because of a pre-existing issue, call that out
    separately instead of folding it into your change.
+
+## Current node DSL boundaries
+
+- Plain `@listen` callbacks remain explicit and non-injecting.
+- `@associate(...)` methods may receive injected node-local or locator-resolved parameters.
+- Non-local node lookup must be expressed through locators such as `Annotated[T, Root / A / T]`.
