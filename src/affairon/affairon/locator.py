@@ -30,16 +30,32 @@ Example::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TypeGuard, override
+
+type LocatorSegment = type[object] | str | LocatorAnchor | Locator
+
+
+def _is_locator_segment(value: object) -> TypeGuard[LocatorSegment]:
+    return (
+        isinstance(value, LocatorAnchor)
+        or isinstance(value, type)
+        or isinstance(value, str)
+        or isinstance(value, Locator)
+    )
 
 
 @dataclass(frozen=True)
 class LocatorAnchor:
     name: str
 
-    def __truediv__(self, other: Any) -> Locator:
-        return Locator((self,)).__truediv__(other)
+    def __truediv__(self, other: object) -> Locator:
+        if not _is_locator_segment(other):
+            raise TypeError(f"Unsupported locator segment: {other!r}")
+        if isinstance(other, Locator):
+            return Locator((self,) + other.segments)
+        return Locator((self, other))
 
+    @override
     def __repr__(self) -> str:
         return self.name
 
@@ -48,7 +64,7 @@ class LocatorAnchor:
 class Locator:
     segments: tuple[object, ...]
 
-    def __truediv__(self, other: Any) -> Locator:
+    def __truediv__(self, other: object) -> Locator:
         if isinstance(other, Locator):
             return Locator(self.segments + other.segments)
         if (
@@ -59,6 +75,7 @@ class Locator:
             return Locator(self.segments + (other,))
         raise TypeError(f"Unsupported locator segment: {other!r}")
 
+    @override
     def __repr__(self) -> str:
         return " / ".join(_segment_name(part) for part in self.segments)
 

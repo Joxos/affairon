@@ -1,11 +1,11 @@
 import re
-from typing import Any
+from typing import cast
 
 from affairon.affairs import MergeStrategy
 from affairon.exceptions import KeyConflictError
 
 
-def callable_name(cb: Any) -> str:
+def callable_name(cb: object) -> str:
     """Return a human-readable name for a callable, safe for logging.
 
     Falls back through ``__qualname__``, ``__name__``, and ``repr()``
@@ -44,7 +44,11 @@ def normalize_name(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _wrap_value(strategy: MergeStrategy, value: Any, source_name: str) -> Any:
+def _wrap_value(
+    strategy: MergeStrategy,
+    value: object,
+    source_name: str,
+) -> object:
     """Transform a value on first insertion based on merge strategy.
 
     For ``list_merge`` every value is stored as a single-element list;
@@ -71,10 +75,10 @@ def _wrap_value(strategy: MergeStrategy, value: Any, source_name: str) -> Any:
 def _resolve_conflict(
     strategy: MergeStrategy,
     key: str,
-    existing: Any,
-    new_value: Any,
+    existing: object,
+    new_value: object,
     source_name: str,
-) -> Any:
+) -> object:
     """Resolve a key conflict between existing and new values.
 
     Args:
@@ -98,16 +102,22 @@ def _resolve_conflict(
         case "override":
             return new_value
         case "list_merge":
-            existing.append(new_value)
-            return existing
+            if not isinstance(existing, list):
+                raise TypeError("list_merge conflict container must be a list")
+            typed_existing = cast(list[object], existing)
+            typed_existing.append(new_value)
+            return typed_existing
         case "dict_merge":
-            existing[source_name] = new_value
-            return existing
+            if not isinstance(existing, dict):
+                raise TypeError("dict_merge conflict container must be a dict")
+            typed_existing = cast(dict[str, object], existing)
+            typed_existing[source_name] = new_value
+            return typed_existing
 
 
 def merge_dict(
-    target: dict[str, Any],
-    source: dict[str, Any],
+    target: dict[str, object],
+    source: dict[str, object],
     *,
     strategy: MergeStrategy = "raise",
     source_name: str = "",

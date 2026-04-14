@@ -30,16 +30,18 @@ Key concepts
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Mapping
-from typing import Any, Self, TypeVar
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Protocol, Self, TypeVar, cast, override
 
+from affairon._types import AsyncCallback, SyncCallback
+from affairon.affairs import MutableAffair
 from affairon.associate import (
     AffairPlaceholder,
-    _rename_generated_affair,
     get_associate_spec,
     iter_associate_specs,
+    rename_generated_affair,
 )
-from affairon.aware import _validate_listener_mode
+from affairon.aware import DispatcherLike, validate_listener_mode
 from affairon.locator import Locator, Parent, Root
 from affairon.runtime import RuntimeRegistry
 
@@ -110,18 +112,22 @@ def inject_to(parent_type: type[Node]) -> Callable[[type[_N]], type[_N]]:
 
     def decorator(node_type: type[_N]) -> type[_N]:
         setattr(node_type, INJECT_PARENT_ATTR, parent_type)
-        children = getattr(parent_type, AUTO_CHILDREN_ATTR, None)
+        children = cast(
+            list[type[_N]] | None, getattr(parent_type, AUTO_CHILDREN_ATTR, None)
+        )
         if children is None:
             children = []
             setattr(parent_type, AUTO_CHILDREN_ATTR, children)
-        children.append(node_type)
+        _ = children.append(node_type)
         return node_type
 
     return decorator
 
 
-def _backfill_declared_affair_placeholders(node_type: type[Any]) -> None:
-    placeholders = getattr(node_type, "_affair_placeholders", {})
+def _backfill_declared_affair_placeholders(node_type: type[object]) -> None:
+    placeholders = cast(
+        dict[str, AffairPlaceholder], getattr(node_type, "_affair_placeholders", {})
+    )
     placeholder_names = list(placeholders)
     associate_specs = iter_associate_specs(node_type)
     if not placeholder_names:
@@ -140,13 +146,14 @@ def _backfill_declared_affair_placeholders(node_type: type[Any]) -> None:
             continue
         if expected is not placeholder:
             raise TypeError(
-                "@associate placeholder "
-                f"'{placeholder_name}' is not declared on {node_type.__name__}"
+                "@associate placeholder"
+                + f" '{placeholder_name}'"
+                + f" is not declared on {node_type.__name__}"
             )
         setattr(node_type, placeholder_name, spec.affair_type)
         claimed_by_identity.add(placeholder_name)
 
-    claims: dict[str, type[Any]] = {}
+    claims: dict[str, type[MutableAffair]] = {}
     for _method_name, spec in associate_specs:
         if spec.expose_as is None:
             continue
@@ -163,7 +170,7 @@ def _backfill_declared_affair_placeholders(node_type: type[Any]) -> None:
         if generated_affair is None:
             continue
         if generated_affair.__name__ != placeholder_name:
-            _rename_generated_affair(generated_affair, placeholder_name)
+            _ = rename_generated_affair(generated_affair, placeholder_name)
         setattr(node_type, placeholder_name, generated_affair)
 
 
@@ -176,24 +183,25 @@ class NodeMeta(type):
     with the generated ``MutableAffair`` subclass.
     """
 
-    _affair_placeholders: dict[str, AffairPlaceholder]
+    _affair_placeholders: dict[str, AffairPlaceholder] = {}
 
     @classmethod
+    @override
     def __prepare__(
         cls,
         name: str,
-        bases: tuple[type[Any], ...],
-        **kwargs: Any,
-    ) -> dict[str, Any]:
+        bases: tuple[type[object], ...],
+        **kwargs: object,
+    ) -> dict[str, object]:
         return {}
 
     def __new__(
         cls,
         name: str,
-        bases: tuple[type[Any], ...],
-        namespace: dict[str, Any],
+        bases: tuple[type[object], ...],
+        namespace: dict[str, object],
     ) -> NodeMeta:
-        node_type = super().__new__(cls, name, bases, namespace)
+        node_type = cast(NodeMeta, super().__new__(cls, name, bases, namespace))
         placeholders = {
             attr_name: value
             for attr_name, value in namespace.items()
@@ -202,7 +210,7 @@ class NodeMeta(type):
         for attr_name, placeholder in placeholders.items():
             placeholder.name = attr_name
         node_type._affair_placeholders = placeholders
-        _backfill_declared_affair_placeholders(node_type)
+        _backfill_declared_affair_placeholders(cast(type[object], node_type))
         return node_type
 
 
@@ -223,11 +231,17 @@ class Node(metaclass=NodeMeta):
     both as affair-dispatched callbacks and as plain method calls.
     """
 
+    _runtime_registry: RuntimeRegistry
+    _is_root: bool
+    _associate_registrations: list[
+        tuple[DispatcherLike, type[MutableAffair], SyncCallback | AsyncCallback]
+    ]
+
     def __init__(self) -> None:
         self._runtime_registry = RuntimeRegistry()
         self._mounted_children: dict[str, Node] = {}
-        self._associate_registrations: list[tuple[Any, type[Any], Any]] = []
-        self._dispatcher: Any | None = None
+        self._associate_registrations = []
+        self._dispatcher: DispatcherLike | None = None
         self._owner: object | None = None
         self._route_name: str | None = None
         self._root: Node | None = None
@@ -271,7 +285,7 @@ class Node(metaclass=NodeMeta):
         self._bind_associated_methods()
         return self
 
-    def attach_dispatcher(self, dispatcher: Any) -> Self:
+    def attach_dispatcher(self, dispatcher: DispatcherLike) -> Self:
         """Connect the entire node tree to *dispatcher*.
 
         Walks every node in the tree and registers each ``@associate``
@@ -298,35 +312,37 @@ class Node(metaclass=NodeMeta):
 
     def _bind_associated_methods(self) -> None:
         dispatcher = self.root._dispatcher if self._root is not None else None
-        if dispatcher is None or not hasattr(dispatcher, "register"):
+        if dispatcher is None:
             return
 
         seen: set[str] = set()
         for klass in type(self).__mro__:
-            for name, attr in vars(klass).items():
+            namespace = cast(Mapping[str, object], vars(klass))
+            for name, attr in namespace.items():
                 if name in seen:
                     continue
                 inner = attr
                 if isinstance(attr, (staticmethod, classmethod)):
-                    inner = attr.__func__
+                    inner = cast(Callable[..., object], attr.__func__)
                 spec = get_associate_spec(inner)
                 if spec is None:
                     continue
-                bound = getattr(self, name)
-                _validate_listener_mode(dispatcher, bound)
+                bound = cast(_BoundAssociate, getattr(self, name))
+                validate_listener_mode(dispatcher, bound)
 
-                def when(affair: Any, self: Node = self) -> bool:
+                def when(affair: MutableAffair, self: Node = self) -> bool:
                     return getattr(affair, "node", None) is self
 
                 callback = _build_associate_callback(bound)
-                dispatcher.register(spec.affair_type, callback, when=when)
+                typed_callback = cast(SyncCallback | AsyncCallback, callback)
+                dispatcher.register(spec.affair_type, typed_callback, when=when)
                 self._associate_registrations.append(
-                    (dispatcher, spec.affair_type, callback)
+                    (dispatcher, spec.affair_type, typed_callback)
                 )
                 seen.add(name)
 
     def _auto_mount_declared_children(self) -> None:
-        declared = getattr(type(self), AUTO_CHILDREN_ATTR, [])
+        declared = cast(list[type[Node]], getattr(type(self), AUTO_CHILDREN_ATTR, []))
         for child_type in declared:
             route_name = getattr(child_type, ROUTE_ATTR, None)
             if not isinstance(route_name, str):
@@ -337,8 +353,9 @@ class Node(metaclass=NodeMeta):
                 child = child_type()
             except TypeError as exc:
                 raise TypeError(
-                    "Auto-mounted node "
-                    f"{child_type.__name__} must have a zero-arg constructor"
+                    "Auto-mounted node"
+                    + f" {child_type.__name__}"
+                    + " must have a zero-arg constructor"
                 ) from exc
             self._mount_child(child)
 
@@ -405,8 +422,9 @@ class Node(metaclass=NodeMeta):
         target = self._resolve_object(locator, start=start)
         if not isinstance(target, expected_type):
             raise LookupError(
-                f"Locator {locator!r} resolved to {type(target).__name__}, "
-                f"expected {expected_type.__name__}"
+                f"Locator {locator!r} resolved to"
+                + f" {type(target).__name__},"
+                + f" expected {expected_type.__name__}"
             )
         return target
 
@@ -434,7 +452,7 @@ class Node(metaclass=NodeMeta):
                 continue
             if isinstance(segment, str):
                 try:
-                    current = getattr(current, segment)
+                    current = cast(object, getattr(current, segment))
                 except AttributeError as exc:
                     raise LookupError(f"Route segment '{segment}' not found") from exc
                 continue
@@ -443,7 +461,7 @@ class Node(metaclass=NodeMeta):
                     if isinstance(current, segment):
                         continue
                     try:
-                        current = current.inject(segment)
+                        current = current.inject(cast(type[object], segment))
                         continue
                     except LookupError:
                         pass
@@ -457,8 +475,9 @@ class Node(metaclass=NodeMeta):
                 if isinstance(current, segment):
                     continue
                 raise LookupError(
-                    "Type segment "
-                    f"{segment.__name__} not found at current locator position"
+                    f"Type segment {segment.__name__}"
+                    + " not found at current"
+                    + " locator position"
                 )
             raise LookupError(f"Unsupported locator segment: {segment!r}")
         return current
@@ -477,18 +496,25 @@ def _require_route_name(node_type: type[Node]) -> str:
     return route_name
 
 
-def _build_associate_callback(bound: Any) -> Any:
+class _BoundAssociate(Protocol):
+    def __call__(self, **kwargs: object) -> object: ...
+
+
+def _build_associate_callback(
+    bound: _BoundAssociate,
+) -> Callable[[MutableAffair], object]:
     parameters = inspect.signature(bound).parameters
 
     if inspect.iscoroutinefunction(bound):
 
-        async def async_callback(affair: Any) -> Any:
+        async def async_callback(affair: MutableAffair) -> object:
             kwargs = _build_associate_kwargs(parameters, affair)
-            return await bound(**kwargs)
+            async_bound = cast(Callable[..., Awaitable[object]], bound)
+            return await async_bound(**kwargs)
 
         return async_callback
 
-    def sync_callback(affair: Any) -> Any:
+    def sync_callback(affair: MutableAffair) -> object:
         kwargs = _build_associate_kwargs(parameters, affair)
         return bound(**kwargs)
 
@@ -497,10 +523,10 @@ def _build_associate_callback(bound: Any) -> Any:
 
 def _build_associate_kwargs(
     parameters: Mapping[str, inspect.Parameter],
-    affair: Any,
-) -> dict[str, Any]:
+    affair: MutableAffair,
+) -> dict[str, object]:
     values = affair.model_dump()
-    kwargs: dict[str, Any] = {}
+    kwargs: dict[str, object] = {}
     if "affair" in parameters:
         kwargs["affair"] = affair
     for name in parameters:

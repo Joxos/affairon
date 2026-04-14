@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any
+from typing import override
 
 from loguru import logger
 
@@ -20,13 +20,14 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
     """
 
     @staticmethod
-    async def _sample_guardian(affair: MutableAffair) -> None:
+    async def _sample_guardian(_affair: MutableAffair) -> None:
         """Silent guardian callback to anchor execution order."""
 
     def __init__(self):
         super().__init__(self._sample_guardian)
 
-    async def emit(self, affair: MutableAffair) -> dict[str, Any]:
+    @override
+    async def emit(self, affair: MutableAffair) -> dict[str, object]:
         """Asynchronously dispatch affair.
 
         When ``affair.emit_up`` is True, callbacks registered on parent
@@ -61,7 +62,7 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
             ExceptionGroup: If multiple listeners fail simultaneously.
         """
         strategy = affair.merge_strategy
-        merged_result: dict[str, Any] = {}
+        merged_result: dict[str, object] = {}
         affair_types = self._resolve_affair_types(affair)
         log.debug(
             "Emit {} (types={})",
@@ -71,7 +72,7 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
         for affair_type in affair_types:
             layers = self._registry.exec_order(affair_type)
             for layer in layers:
-                tasks: list[asyncio.Task[dict[str, Any] | None]] = []
+                tasks: list[asyncio.Task[dict[str, object] | None]] = []
                 filtered_cbs: list[AsyncCallback] = []
                 async with asyncio.TaskGroup() as group:
                     for callback in layer:
@@ -86,11 +87,6 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
                 for cb, task in zip(filtered_cbs, tasks, strict=True):
                     result = task.result()
                     if result is not None:
-                        if not isinstance(result, dict):
-                            raise TypeError(
-                                f"Callback {callable_name(cb)} returned "
-                                f"{type(result).__name__}, expected dict or None"
-                            )
                         merge_dict(
                             merged_result,
                             result,
@@ -103,7 +99,7 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
         self,
         callback: AsyncCallback,
         affair: MutableAffair,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Invoke a callback, routing exceptions to error handling.
 
         Wraps the callback invocation so that exceptions are caught
@@ -129,7 +125,7 @@ class AsyncDispatcher(BaseDispatcher[AsyncCallback]):
         callback: AsyncCallback,
         affair: MutableAffair,
         exception: Exception,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Handle a callback exception via CallbackErrorAffair.
 
         Emits a :class:`CallbackErrorAffair` and reads the merged error

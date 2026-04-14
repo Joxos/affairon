@@ -28,6 +28,8 @@ class BaseRegistry[CB]:
     parent affair type callbacks are NOT inherited (no MRO expansion).
     """
 
+    _guardian: CB
+
     def __init__(self, guardian: CB) -> None:
         """Initialize empty registry.
 
@@ -77,14 +79,14 @@ class BaseRegistry[CB]:
                 if dep not in graph:
                     raise ValueError(
                         f"after={dep.__qualname__} not registered for affair type "
-                        f"{affair_type.__qualname__}"
+                        + f"{affair_type.__qualname__}"
                     )
 
             graph.add_node(callback, when=when)
 
             # Add dependency edges (dep -> callback means dep executes before callback)
             for dep in after or [self._guardian]:
-                graph.add_edge(dep, callback)
+                _ = graph.add_edge(dep, callback)
 
             # Check for cycles
             if cycles := list(nx.simple_cycles(graph)):
@@ -94,8 +96,8 @@ class BaseRegistry[CB]:
 
                 raise CyclicDependencyError(
                     f"cyclic dependency detected: adding {callback.__qualname__} "
-                    f"would create a cycle in {affair_type.__qualname__}"
-                    f" - cycles: {cycles}"
+                    + f"would create a cycle in {affair_type.__qualname__}"
+                    + f" - cycles: {cycles}"
                 )
 
             log.debug(
@@ -163,7 +165,7 @@ class BaseRegistry[CB]:
         # If specific func requested and affair not requested
         elif callback is not None:
             # Search for all graphs of all affairs for func node and remove it
-            affairs_to_clean = []
+            affairs_to_clean: list[type[MutableAffair]] = []
             for affair_type, graph in self._graphs.items():
                 if callback in graph:
                     graph.remove_node(callback)
@@ -203,7 +205,7 @@ class BaseRegistry[CB]:
         when = graph.nodes[callback].get("when")
         if when is None:
             return True
-        return when(affair)
+        return bool(when(affair))  # pyright: ignore[reportAny]
 
     def exec_order(self, affair_type: type[MutableAffair]) -> list[list[CB]]:
         """Return execution order for an affair type using breadth-first enumeration.

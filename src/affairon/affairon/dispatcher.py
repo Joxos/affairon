@@ -1,6 +1,6 @@
 """Synchronous dispatcher for affair handling."""
 
-from typing import Any
+from typing import override
 
 from loguru import logger
 
@@ -20,13 +20,14 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
     """
 
     @staticmethod
-    def _sample_guardian(affair: MutableAffair) -> None:
+    def _sample_guardian(_affair: MutableAffair) -> None:
         """Silent guardian callback to anchor execution order."""
 
     def __init__(self):
         super().__init__(self._sample_guardian)
 
-    def emit(self, affair: MutableAffair) -> dict[str, Any]:
+    @override
+    def emit(self, affair: MutableAffair) -> dict[str, object]:
         """Synchronously dispatch affair.
 
         When ``affair.emit_up`` is True, callbacks registered on parent
@@ -59,7 +60,7 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
             RecursionError: If listeners form infinite recursion chain.
         """
         strategy = affair.merge_strategy
-        merged_result: dict[str, Any] = {}
+        merged_result: dict[str, object] = {}
         affair_types = self._resolve_affair_types(affair)
         log.debug(
             "Emit {} (types={})",
@@ -77,11 +78,6 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
                     except Exception as exc:
                         result = self._handle_callback_error(cb, affair, exc)
                     if result is not None:
-                        if not isinstance(result, dict):
-                            raise TypeError(
-                                f"Callback {callable_name(cb)} returned "
-                                f"{type(result).__name__}, expected dict or None"
-                            )
                         merge_dict(
                             merged_result,
                             result,
@@ -95,7 +91,7 @@ class Dispatcher(BaseDispatcher[SyncCallback]):
         callback: SyncCallback,
         affair: MutableAffair,
         exception: Exception,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Handle a callback exception via CallbackErrorAffair.
 
         Emits a :class:`CallbackErrorAffair` and reads the merged error

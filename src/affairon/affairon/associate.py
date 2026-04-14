@@ -25,16 +25,16 @@ connected to a :class:`~affairon.Dispatcher`) and a plain method call
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping
 from functools import wraps
 from inspect import BoundArguments, iscoroutinefunction, signature
-from typing import Any
+from typing import Protocol, cast
 
 from pydantic import create_model
 
 from affairon.affairs import MutableAffair
 from affairon.listen import LISTEN_SPEC_ATTR, ListenSpec
-from affairon.runtime import _resolve_injected_kwargs
+from affairon.runtime import resolve_injected_kwargs
 
 ASSOCIATE_SPEC_ATTR = "_affair_associate_spec"
 
@@ -48,7 +48,7 @@ class AffairPlaceholder:
     """
 
     def __init__(self, name: str | None = None) -> None:
-        self.name = name
+        self.name: str | None = name
 
 
 def affair() -> type[MutableAffair]:
@@ -68,14 +68,19 @@ def affair() -> type[MutableAffair]:
     after the class is created.  The generated affair has fields inferred
     from the handler's parameter signature.
     """
-    return AffairPlaceholder()  # type: ignore[return-value]
+    return AffairPlaceholder()  # pyright: ignore[reportReturnType]  # type: ignore[return-value]
 
 
 class AssociateSpec:
+    affair_type: type[MutableAffair]
+    callback: Callable[..., object]
+    expose_as: str | None
+    placeholder: AffairPlaceholder | None
+
     def __init__(
         self,
         affair_type: type[MutableAffair],
-        callback: Callable[..., Any],
+        callback: Callable[..., object],
         expose_as: str | None,
         placeholder: AffairPlaceholder | None,
     ) -> None:
@@ -86,40 +91,37 @@ class AssociateSpec:
 
 
 def _build_generated_affair(
-    func: Callable[..., Any],
-    affair_type: type[Any],
+    func: Callable[..., object],
+    affair_type: type[MutableAffair] | AffairPlaceholder,
 ) -> type[MutableAffair]:
-    if isinstance(affair_type, type) and issubclass(affair_type, MutableAffair):
+    if isinstance(affair_type, type):
         return affair_type
-    if not isinstance(affair_type, AffairPlaceholder):
-        raise TypeError(
-            f"@associate expects an affair() placeholder or a MutableAffair subclass, "
-            f"got {affair_type!r}"
-        )
     generated_name = affair_type.name or f"{func.__qualname__.replace('.', '')}Affair"
 
-    field_definitions: dict[str, Any] = {"node": (object, ...)}
+    field_definitions: dict[str, object] = {"node": (object, ...)}
     for name, parameter in signature(func).parameters.items():
         if name == "self":
             continue
-        if parameter.default is not parameter.empty:
+        default = cast(object, parameter.default)
+        if default is not parameter.empty:
             continue
-        if parameter.annotation is parameter.empty:
+        annotation = cast(object, parameter.annotation)
+        if annotation is parameter.empty:
             raise TypeError(
                 f"Cannot generate affair field for '{name}' without annotation"
             )
         if name == "affair":
             continue
-        field_definitions[name] = (parameter.annotation, ...)
+        field_definitions[name] = (annotation, ...)
 
-    return create_model(  # type: ignore[return-value]
-        generated_name,
-        __base__=MutableAffair,
-        **field_definitions,
+    generated: type[MutableAffair] = cast(
+        type[MutableAffair],
+        create_model(generated_name, __base__=MutableAffair, **field_definitions),  # pyright: ignore[reportCallIssue,reportArgumentType]
     )
+    return generated
 
 
-def _rename_generated_affair(
+def rename_generated_affair(
     affair_type: type[MutableAffair],
     name: str,
 ) -> type[MutableAffair]:
@@ -128,23 +130,24 @@ def _rename_generated_affair(
     return affair_type
 
 
-def get_associate_spec(obj: Any) -> AssociateSpec | None:
+def get_associate_spec(obj: object) -> AssociateSpec | None:
     spec = getattr(obj, ASSOCIATE_SPEC_ATTR, None)
     if isinstance(spec, AssociateSpec):
         return spec
     return None
 
 
-def iter_associate_specs(cls: type[Any]) -> list[tuple[str, AssociateSpec]]:
+def iter_associate_specs(cls: type[object]) -> list[tuple[str, AssociateSpec]]:
     specs: list[tuple[str, AssociateSpec]] = []
     seen: set[str] = set()
     for klass in cls.__mro__:
-        for name, attr in vars(klass).items():
+        namespace = cast(Mapping[str, object], vars(klass))
+        for name, attr in namespace.items():
             if name in seen:
                 continue
-            inner = attr
+            inner: object = attr
             if isinstance(attr, (staticmethod, classmethod)):
-                inner = attr.__func__
+                inner = cast(Callable[..., object], attr.__func__)
             spec = get_associate_spec(inner)
             if spec is None:
                 continue
@@ -154,10 +157,10 @@ def iter_associate_specs(cls: type[Any]) -> list[tuple[str, AssociateSpec]]:
 
 
 def associate(
-    affair_type: type[Any],
+    affair_type: object,
     *,
     expose_as: str | None = None,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[[Callable[..., object]], Callable[..., object]]:
     """Bind a node method as the handler for *affair_type*.
 
     *affair_type* is either an ``affair()`` placeholder or a concrete
@@ -175,21 +178,41 @@ def associate(
             class attribute on the node.
     """
 
-    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
-        placeholder = (
-            affair_type if isinstance(affair_type, AffairPlaceholder) else None
+    if not isinstance(affair_type, AffairPlaceholder) and not (
+        isinstance(affair_type, type) and issubclass(affair_type, MutableAffair)
+    ):
+        raise TypeError(
+            "@associate expects an affair() placeholder or MutableAffair subclass"
         )
-        generated_affair = _build_generated_affair(func, affair_type)
+    typed_affair_type = affair_type
 
-        def resolve_for_associate(bound: BoundArguments) -> Any:
+    class _AssociateNode(Protocol):
+        def resolve(self, locator: object, expected_type: type[object]) -> object: ...
+
+        def inject(self, key: type[object]) -> object: ...
+
+    def decorator(func: Callable[..., object]) -> Callable[..., object]:
+        placeholder = (
+            typed_affair_type
+            if isinstance(typed_affair_type, AffairPlaceholder)
+            else None
+        )
+        generated_affair = _build_generated_affair(func, typed_affair_type)
+
+        def resolve_for_associate(bound: BoundArguments) -> _AssociateNode:
             if "self" not in bound.arguments:
                 raise TypeError("@associate methods require 'self'")
-            return bound.arguments["self"]
+            return cast(_AssociateNode, bound.arguments["self"])
 
-        def resolve_affair(bound: BoundArguments) -> Any | None:
+        def resolve_affair(bound: BoundArguments) -> object | None:
             return bound.arguments.get("affair")
 
-        def resolver(runtime_type: type[Any], locator: Any, *, node: Any) -> Any:
+        def resolver(
+            runtime_type: type[object],
+            locator: object | None,
+            *,
+            node: _AssociateNode,
+        ) -> object:
             if locator is not None:
                 return node.resolve(locator, runtime_type)
             return node.inject(runtime_type)
@@ -197,11 +220,11 @@ def associate(
         if iscoroutinefunction(func):
 
             @wraps(func)
-            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            async def async_wrapper(*args: object, **kwargs: object) -> object:
                 bound = signature(func).bind_partial(*args, **kwargs)
                 node = resolve_for_associate(bound)
                 affair = resolve_affair(bound)
-                injected = _resolve_injected_kwargs(
+                injected = resolve_injected_kwargs(
                     func,
                     lambda runtime_type, locator: resolver(
                         runtime_type, locator, node=node
@@ -211,7 +234,8 @@ def associate(
                 )
                 if "affair" not in bound.arguments and affair is not None:
                     injected["affair"] = affair
-                return await func(*args, **kwargs, **injected)
+                async_func = cast(Callable[..., Awaitable[object]], func)
+                return await async_func(*args, **kwargs, **injected)
 
             setattr(
                 async_wrapper,
@@ -227,11 +251,11 @@ def associate(
             return async_wrapper
 
         @wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        def sync_wrapper(*args: object, **kwargs: object) -> object:
             bound = signature(func).bind_partial(*args, **kwargs)
             node = resolve_for_associate(bound)
             affair = resolve_affair(bound)
-            injected = _resolve_injected_kwargs(
+            injected = resolve_injected_kwargs(
                 func,
                 lambda runtime_type, locator: resolver(
                     runtime_type, locator, node=node
@@ -263,7 +287,7 @@ __all__ = [
     "ASSOCIATE_SPEC_ATTR",
     "AffairPlaceholder",
     "AssociateSpec",
-    "_rename_generated_affair",
+    "rename_generated_affair",
     "affair",
     "associate",
     "get_associate_spec",

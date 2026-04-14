@@ -1,14 +1,18 @@
 import importlib
 import importlib.metadata
-import inspect
 import tomllib
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import cast
 
 from loguru import logger
 from packaging.requirements import Requirement
 from packaging.version import Version
 
+from affairon._types import AsyncCallback, SyncCallback
+from affairon.affairs import MutableAffair
+from affairon.aware import DispatcherLike, validate_listener_mode
 from affairon.exceptions import (
     PluginConfigError,
     PluginEntryPointError,
@@ -17,12 +21,14 @@ from affairon.exceptions import (
     PluginTargetError,
     PluginVersionError,
 )
-from affairon.listen import get_listen_spec
+from affairon.listen import ListenSpec, get_listen_spec
 from affairon.utils import normalize_name
 
 log = logger.bind(source=__name__)
 
 ENTRY_POINT_GROUP = "affairon.plugins"
+
+type TomlTable = dict[str, object]
 
 
 def _config_section_name(profile: str | None) -> str:
@@ -31,24 +37,9 @@ def _config_section_name(profile: str | None) -> str:
     return f"[tool.affairon.profiles.{profile}]"
 
 
-def _validate_listener_mode(dispatcher: Any, callback: Any) -> None:
-    dispatcher_is_async = inspect.iscoroutinefunction(dispatcher.emit)
-    callback_is_async = inspect.iscoroutinefunction(callback)
-
-    if dispatcher_is_async == callback_is_async:
-        return
-
-    expected = "async" if dispatcher_is_async else "sync"
-    actual = "async" if callback_is_async else "sync"
-    raise PluginTargetError(
-        f"{callback.__qualname__} is {actual}, but {type(dispatcher).__qualname__} "
-        f"requires {expected} callbacks"
-    )
-
-
 class PluginComposer:
-    def __init__(self, dispatcher: Any) -> None:
-        self.dispatcher = dispatcher
+    def __init__(self, dispatcher: DispatcherLike) -> None:
+        self.dispatcher: DispatcherLike = dispatcher
         self.loaded_plugins: set[str] = set()
         self.loaded_local_plugins: set[str] = set()
 
@@ -72,7 +63,7 @@ class PluginComposer:
     ) -> None:
         try:
             with pyproject_path.open("rb") as fh:
-                config = tomllib.load(fh)
+                config = cast(dict[str, object], tomllib.load(fh))
         except tomllib.TOMLDecodeError as err:
             raise PluginConfigError(
                 f"Failed to parse pyproject.toml '{pyproject_path}': {err}"
@@ -115,25 +106,27 @@ class PluginComposer:
 
     def _resolve_affairon_config(
         self,
-        config: dict[str, Any],
+        config: dict[str, object],
         *,
         pyproject_path: Path,
         profile: str | None,
-    ) -> dict[str, Any]:
-        tool_config = config.get("tool", {})
+    ) -> dict[str, object]:
+        tool_config: object = config.get("tool", {})
         if not isinstance(tool_config, dict):
             raise PluginConfigError(f"[tool] in '{pyproject_path}' must be a table")
 
-        affairon_config = tool_config.get("affairon", {})
+        tool_table = cast(dict[str, object], tool_config)
+        affairon_config: object = tool_table.get("affairon", {})
         if not isinstance(affairon_config, dict):
             raise PluginConfigError(
                 f"[tool.affairon] in '{pyproject_path}' must be a table"
             )
+        affairon_table = cast(dict[str, object], affairon_config)
 
         if profile is None:
-            return affairon_config
+            return affairon_table
 
-        profiles = affairon_config.get("profiles")
+        profiles = affairon_table.get("profiles")
         if profiles is None:
             raise PluginConfigError(
                 f"Profile '{profile}' not found in '{pyproject_path}'"
@@ -143,7 +136,7 @@ class PluginComposer:
                 f"[tool.affairon.profiles] in '{pyproject_path}' must be a table"
             )
 
-        profile_config = profiles.get(profile)
+        profile_config = cast(dict[str, object], profiles).get(profile)
         if profile_config is None:
             raise PluginConfigError(
                 f"Profile '{profile}' not found in '{pyproject_path}'"
@@ -153,25 +146,34 @@ class PluginComposer:
                 f"{_config_section_name(profile)} in '{pyproject_path}' must be a table"
             )
 
-        return profile_config
+        return cast(dict[str, object], profile_config)
 
     def _read_plugin_list(
         self,
-        affairon_config: dict[str, Any],
+        affairon_config: dict[str, object],
         *,
         key: str,
         pyproject_path: Path,
         profile: str | None,
     ) -> list[str]:
         value = affairon_config.get(key, [])
-        if not isinstance(value, list) or not all(
-            isinstance(item, str) for item in value
-        ):
+        if not isinstance(value, list):
             raise PluginConfigError(
-                f"{_config_section_name(profile)}.{key} in '{pyproject_path}' "
-                "must be a list of strings"
+                f"{_config_section_name(profile)}.{key}"
+                + f" in '{pyproject_path}'"
+                + " must be a list of strings"
             )
-        return value
+        value_items = cast(list[object], value)
+        str_items: list[str] = []
+        for item in value_items:
+            if not isinstance(item, str):
+                raise PluginConfigError(
+                    f"{_config_section_name(profile)}.{key}"
+                    + f" in '{pyproject_path}'"
+                    + " must be a list of strings"
+                )
+            str_items.append(item)
+        return str_items
 
     def _load_plugin(self, requirement: Requirement) -> None:
         plugin_name = requirement.name
@@ -191,15 +193,16 @@ class PluginComposer:
         installed_version = Version(dist.version)
         if not requirement.specifier.contains(installed_version):
             raise PluginVersionError(
-                f"Plugin '{plugin_name}' version {installed_version} "
-                f"does not satisfy requirement '{requirement}'"
+                f"Plugin '{plugin_name}' version "
+                + f"{installed_version} does not satisfy"
+                + f" requirement '{requirement}'"
             )
 
         eps = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP, name=plugin_name)
         if not eps:
             raise PluginEntryPointError(
-                f"Plugin '{plugin_name}' has no entry point "
-                f"in group '{ENTRY_POINT_GROUP}'"
+                f"Plugin '{plugin_name}' has no entry"
+                + f" point in group '{ENTRY_POINT_GROUP}'"
             )
 
         ep = next(iter(eps))
@@ -229,35 +232,47 @@ class PluginComposer:
 
         self._register_module_listeners(module, plugin_label=plugin_label)
 
-    def _register_module_listeners(self, module: Any, *, plugin_label: str) -> None:
-        module_callbacks: dict[Any, Any] = {}
-        callback_specs: list[tuple[Any, Any]] = []
-        registrations: list[tuple[list[Any], Any]] = []
+    def _register_module_listeners(
+        self, module: ModuleType, *, plugin_label: str
+    ) -> None:
+        module_callbacks: dict[Callable[..., object], Callable[..., object]] = {}
+        callback_specs: list[tuple[Callable[..., object], ListenSpec]] = []
+        registrations: list[
+            tuple[list[type[MutableAffair]], SyncCallback | AsyncCallback]
+        ] = []
 
-        for _name, attr in vars(module).items():
-            if not callable(attr):
+        module_namespace = cast(Mapping[str, object], vars(module))
+        for _name, attr in module_namespace.items():
+            attr_obj: object = attr
+            if not callable(attr_obj):
                 continue
-            if getattr(attr, "__module__", None) != module.__name__:
+            if getattr(attr_obj, "__module__", None) != module.__name__:
                 continue
-            spec = get_listen_spec(attr)
+            spec = get_listen_spec(attr_obj)
             if spec is None:
                 continue
-            module_callbacks[attr] = attr
-            callback_specs.append((attr, spec))
+            callback = attr_obj
+            module_callbacks[callback] = callback
+            callback_specs.append((callback, spec))
 
         try:
             for callback, spec in callback_specs:
-                _validate_listener_mode(self.dispatcher, callback)
+                validate_listener_mode(self.dispatcher, callback)
                 after = spec.after
+                after_cbs: list[Callable[..., object]] | None = None
                 if after:
-                    after = [module_callbacks.get(cb, cb) for cb in after]
+                    after_cbs = [
+                        module_callbacks.get(cb, cb)
+                        for cb in cast(list[Callable[..., object]], after)
+                    ]
+                typed_callback = cast(SyncCallback | AsyncCallback, callback)
                 self.dispatcher.register(
                     spec.affair_types,
-                    callback,
-                    after=after,
+                    typed_callback,
+                    after=after_cbs,
                     when=spec.when,
                 )
-                registrations.append((spec.affair_types, callback))
+                registrations.append((spec.affair_types, typed_callback))
         except Exception as exc:
             for affair_types, callback in registrations:
                 try:
@@ -267,7 +282,7 @@ class PluginComposer:
             if isinstance(exc, PluginTargetError):
                 raise
             raise PluginTargetError(
-                f"Failed to register listened callbacks from '{plugin_label}'"
+                f"Failed to register listened callbacks from '{plugin_label}': {exc}"
             ) from exc
 
         log.debug(

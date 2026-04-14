@@ -5,7 +5,7 @@ and framework meta-affairs (AffairMain, CallbackErrorAffair, etc.).
 """
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -35,12 +35,16 @@ class MutableAffair(BaseModel):
             callback results.  Defaults to ``"raise"``.
     """
 
-    model_config = ConfigDict(validate_assignment=True, extra="forbid", strict=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        validate_assignment=True,
+        extra="forbid",
+        strict=True,
+    )
 
     emit_up: bool = False
     merge_strategy: MergeStrategy = "raise"
 
-    def __init__(self, **data: Any) -> None:
+    def __init__(self, **data: Any) -> None:  # pyright: ignore[reportAny, reportExplicitAny]
         """Wrap pydantic ValidationError into AffairValidationError."""
         try:
             super().__init__(**data)
@@ -64,7 +68,11 @@ class Affair(MutableAffair):
         AffairValidationError: If fields fail pydantic validation.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        strict=True,
+    )
 
 
 class MetaAffair(Affair):
@@ -105,4 +113,4 @@ class AffairMain(MetaAffair):
     """
 
     project_path: Path = Path(".").resolve()
-    dispatcher: Any
+    dispatcher: Any  # pyright: ignore[reportExplicitAny]

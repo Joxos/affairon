@@ -17,10 +17,10 @@ A callback may return a ``dict[str, V]`` whose entries are merged into
 the final result, or ``None`` to contribute nothing.
 """
 
-type SyncCallback = Callable[[MutableAffair], StandardResult[Any]]
+type SyncCallback = Callable[[MutableAffair], StandardResult[Any]]  # pyright: ignore[reportExplicitAny]
 """Internal storage type for synchronous affair callbacks."""
 
-type AsyncCallback = Callable[[MutableAffair], Coroutine[Any, Any, StandardResult[Any]]]
+type AsyncCallback = Callable[[MutableAffair], Coroutine[Any, Any, StandardResult[Any]]]  # pyright: ignore[reportExplicitAny]
 """Internal storage type for asynchronous affair callbacks."""
 
 __all__ = [

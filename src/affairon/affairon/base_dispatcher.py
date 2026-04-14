@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, cast
+from typing import SupportsInt, cast
 
 from affairon.affairs import MutableAffair
 from affairon.registry import BaseRegistry
@@ -29,7 +29,7 @@ class BaseDispatcher[CB](ABC):
         self._guardian = guardian
         self._registry = BaseRegistry[CB](self._guardian)
 
-    def on[A: MutableAffair, R: (dict[str, Any] | None)](
+    def on[A: MutableAffair, R: (dict[str, object] | None)](
         self,
         *affair_types: type[A],
         after: list[Callable[[A], R]] | None = None,
@@ -59,11 +59,12 @@ class BaseDispatcher[CB](ABC):
         def decorator(func: Callable[[A], R]) -> Callable[[A], R]:
             cb = cast(CB, func)
             after_cbs = cast(list[CB] | None, after)
+            when_cb = cast(Callable[[MutableAffair], bool] | None, when)
             self.register(
                 list(affair_types),
                 cb,
                 after=after_cbs,
-                when=when,  # type: ignore[arg-type]
+                when=when_cb,
             )
             return func
 
@@ -130,7 +131,7 @@ class BaseDispatcher[CB](ABC):
         self._registry.remove(normalized_types, callback)
 
     @abstractmethod
-    def emit(self, affair: MutableAffair) -> Any:
+    def emit(self, affair: MutableAffair) -> object:
         """Dispatch affair to listeners.
 
         Args:
@@ -150,7 +151,7 @@ class BaseDispatcher[CB](ABC):
         raise NotImplementedError
 
     @staticmethod
-    def _read_error_policy(policy: dict[str, Any]) -> tuple[int, bool, bool]:
+    def _read_error_policy(policy: dict[str, object]) -> tuple[int, bool, bool]:
         """Extract error-handling control keys from a merged handler result.
 
         Reads ``retry``, ``deadletter``, and ``silent`` from *policy*,
@@ -167,11 +168,12 @@ class BaseDispatcher[CB](ABC):
         """
         retry_raw = policy.get("retry", 0)
         try:
-            retry = int(retry_raw)
+            retry = int(cast(SupportsInt | str | bytes | bytearray, retry_raw))
         except (ValueError, TypeError) as exc:
             raise TypeError(
-                f"'retry' must be int-convertible, got {type(retry_raw).__name__}: "
-                f"{retry_raw!r}"
+                "'retry' must be int-convertible, "
+                + f"got {type(retry_raw).__name__}: "
+                + f"{retry_raw!r}"
             ) from exc
         deadletter = bool(policy.get("deadletter", False))
         silent = bool(policy.get("silent", False))
@@ -195,8 +197,4 @@ class BaseDispatcher[CB](ABC):
         """
         if not affair.emit_up:
             return [type(affair)]
-        return [
-            t
-            for t in type(affair).__mro__
-            if isinstance(t, type) and issubclass(t, MutableAffair)
-        ]
+        return [t for t in type(affair).__mro__ if issubclass(t, MutableAffair)]
