@@ -15,13 +15,12 @@ logger.disable("affairon")
 
 from affairon.affairs import (
     Affair,
-    AffairDeadLetteredAffair,
     AffairMain,
     CallbackErrorAffair,
     MetaAffair,
     MutableAffair,
 )
-from affairon.associate import associate
+from affairon.associate import affair, associate
 from affairon.async_dispatcher import AsyncDispatcher
 from affairon.aware import AffairAware
 from affairon.dispatcher import Dispatcher
@@ -40,7 +39,7 @@ from affairon.exceptions import (
 )
 from affairon.listen import listen
 from affairon.locator import Parent, Root
-from affairon.node import Node, RootNode, root, route
+from affairon.node import Node, child_of, root, route
 from affairon.runtime import RuntimeRegistry, inject_from
 
 # Module-level default dispatcher singletons
@@ -56,7 +55,6 @@ __all__ = [
     "AffairMain",
     "AffairAware",
     "CallbackErrorAffair",
-    "AffairDeadLetteredAffair",
     "MutableAffair",
     # Dispatcher classes
     "Dispatcher",
@@ -64,11 +62,12 @@ __all__ = [
     "default_dispatcher",
     "default_async_dispatcher",
     "listen",
+    "affair",
     "associate",
     "route",
     "root",
+    "child_of",
     "Node",
-    "RootNode",
     "Root",
     "Parent",
     "RuntimeRegistry",

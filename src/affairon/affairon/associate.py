@@ -15,8 +15,12 @@ ASSOCIATE_SPEC_ATTR = "_affair_associate_spec"
 
 
 class AffairPlaceholder:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str | None = None) -> None:
         self.name = name
+
+
+def affair() -> type[MutableAffair]:
+    return AffairPlaceholder()  # type: ignore[return-value]
 
 
 class AssociateSpec:
@@ -37,8 +41,11 @@ def _build_generated_affair(
     func: Callable[..., Any],
     affair_type: type[Any],
 ) -> type[MutableAffair]:
+    generated_name: str
     if isinstance(affair_type, AffairPlaceholder):
-        generated_name = affair_type.name
+        generated_name = (
+            affair_type.name or f"{func.__qualname__.replace('.', '')}Affair"
+        )
     elif isinstance(affair_type, type) and issubclass(affair_type, MutableAffair):
         return affair_type
     else:
@@ -197,6 +204,7 @@ __all__ = [
     "AffairPlaceholder",
     "AssociateSpec",
     "_rename_generated_affair",
+    "affair",
     "associate",
     "get_associate_spec",
     "iter_associate_specs",

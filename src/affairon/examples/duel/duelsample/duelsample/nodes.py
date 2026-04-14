@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from affairon import Affair, Node, Parent, associate, root, route
+from affairon import Node, Parent, affair, associate, child_of, root, route
 
 
 class PlayerRuntime:
@@ -12,8 +12,8 @@ class PlayerRuntime:
 
 @route("life")
 class LifePoint(Node):
-    SetLifePointsAffair: Affair
-    LoseLifePointsAffair: Affair
+    SetLifePointsAffair = affair()
+    LoseLifePointsAffair = affair()
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,10 +40,10 @@ class Player(Node):
     pass
 
 
-@LifePoint.inject
+@child_of(LifePoint)
 @route("lp")
 class LifeLog(Node):
-    DescribeLifeAffair: Affair
+    DescribeLifeAffair = affair()
 
     @associate(DescribeLifeAffair)
     def describe(
@@ -53,7 +53,7 @@ class LifeLog(Node):
         return {"player": runtime.name}
 
 
-@Player.inject
+@child_of(Player)
 @route("lp")
 class PlayerLifePoint(LifePoint):
     pass

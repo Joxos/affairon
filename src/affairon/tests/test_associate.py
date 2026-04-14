@@ -4,7 +4,7 @@ from typing import Annotated, cast
 
 import pytest
 
-from affairon import Affair, Dispatcher, Node, Parent, Root, RootNode, associate, route
+from affairon import Dispatcher, Node, Parent, Root, affair, associate, route
 from affairon.affairs import MutableAffair
 from affairon.associate import get_associate_spec
 
@@ -38,8 +38,8 @@ class ChildNode(Node):
 
 @route("duel")
 class DuelNode(Node):
-    SetPhaseAffair: Affair
-    LoseLifeAffair: Affair
+    SetPhaseAffair = affair()
+    LoseLifeAffair = affair()
 
     @associate(type("LoseLifeAffair", (), {}), expose_as="LoseLifeAffair")
     def lose_life(self, amount: int) -> dict[str, int]:
@@ -58,7 +58,7 @@ class DuelNode(Node):
 
 
 def test_associate_injects_local_runtime() -> None:
-    root = RootNode()
+    root = Node().mark_root()
     node = root.mount(PhaseNode())
     node.provide(PhaseRuntime("DRAW"))
 
@@ -68,7 +68,7 @@ def test_associate_injects_local_runtime() -> None:
 
 
 def test_associate_resolves_annotated_locator() -> None:
-    root = RootNode()
+    root = Node().mark_root()
     owner = root.mount(OwnerNode())
     owner.provide(PhaseRuntime("BATTLE"))
     child = ChildNode()
@@ -78,7 +78,7 @@ def test_associate_resolves_annotated_locator() -> None:
 
 
 def test_locator_leaf_type_must_match_annotation() -> None:
-    root = RootNode()
+    root = Node().mark_root()
     owner = root.mount(OwnerNode())
     owner.provide(PhaseRuntime("BATTLE"))
 
@@ -152,9 +152,9 @@ def test_direct_associate_call_does_not_emit() -> None:
 
 def test_direct_placeholder_syntax_exec_works() -> None:
     namespace = {
-        "Affair": Affair,
         "Dispatcher": Dispatcher,
         "Node": Node,
+        "affair": affair,
         "associate": associate,
         "route": route,
     }
@@ -163,7 +163,7 @@ def test_direct_placeholder_syntax_exec_works() -> None:
         """
 @route('duel')
 class DuelSnippet(Node):
-    SetPhaseAffair: Affair
+    SetPhaseAffair = affair()
 
     @associate(SetPhaseAffair)
     def set_phase(self, phase: str) -> dict[str, str]:

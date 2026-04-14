@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from affairon import Node, RootNode, root, route
+from affairon import Node, child_of, root, route
 
 
 class PhaseRuntime:
@@ -22,7 +22,7 @@ class DuelNode(Node):
 
 
 @route("child")
-@DuelNode.inject
+@child_of(DuelNode)
 class ChildNode(Node):
     pass
 
@@ -34,7 +34,7 @@ class BrokenRootNode(Node):
 
 
 @route("invalid")
-@BrokenRootNode.inject
+@child_of(BrokenRootNode)
 class InvalidChildNode(Node):
     def __init__(self, name: str) -> None:
         super().__init__()
@@ -42,7 +42,7 @@ class InvalidChildNode(Node):
 
 
 def test_root_mounts_node_by_route_name() -> None:
-    root_node = RootNode()
+    root_node = Node().mark_root()
     node = PhaseNode()
 
     root_node.mount(node)
@@ -51,7 +51,7 @@ def test_root_mounts_node_by_route_name() -> None:
 
 
 def test_node_local_runtime_registry_still_works() -> None:
-    root_node = RootNode()
+    root_node = Node().mark_root()
     node = root_node.mount(PhaseNode())
 
     runtime = node.provide(PhaseRuntime("DRAW"))

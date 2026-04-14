@@ -93,22 +93,6 @@ class CallbackErrorAffair(MetaAffair):
     error_type: str
 
 
-class AffairDeadLetteredAffair(MetaAffair):
-    """Meta-affair emitted when an affair enters the dead letter queue.
-
-    Attributes:
-        listener_name: Name of the listener that failed processing.
-        original_affair_type: Type name of the dead-lettered affair.
-        error_message: Reason for entering dead letter queue.
-        retry_count: Number of retry attempts before dead-lettering.
-    """
-
-    listener_name: str
-    original_affair_type: str
-    error_message: str
-    retry_count: int
-
-
 class AffairMain(MetaAffair):
     """Meta-affair emitted by fairun to start the application.
 

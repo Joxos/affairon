@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Mapping
-from typing import Any, TypeVar, get_type_hints
+from typing import Any, TypeVar
 
-from affairon.affairs import Affair
 from affairon.associate import (
     AffairPlaceholder,
     _rename_generated_affair,
@@ -22,10 +21,6 @@ ROOT_MARK_ATTR = "_affair_root_marked"
 AUTO_CHILDREN_ATTR = "_affair_auto_children"
 
 
-def _is_affair_placeholder_annotation(annotation: Any) -> bool:
-    return annotation is Affair or annotation == "Affair"
-
-
 def route(name: str):
     def decorator(obj: Any) -> Any:
         setattr(obj, ROUTE_ATTR, name)
@@ -39,16 +34,22 @@ def root(node_type: type[Node]) -> type[Node]:
     return node_type
 
 
+def child_of(parent_type: type[Node]):
+    def decorator(node_type: type[Node]) -> type[Node]:
+        setattr(node_type, INJECT_PARENT_ATTR, parent_type)
+        children = getattr(parent_type, AUTO_CHILDREN_ATTR, None)
+        if children is None:
+            children = []
+            setattr(parent_type, AUTO_CHILDREN_ATTR, children)
+        children.append(node_type)
+        return node_type
+
+    return decorator
+
+
 def _backfill_declared_affair_placeholders(node_type: type[Any]) -> None:
     placeholders = getattr(node_type, "_affair_placeholders", {})
     placeholder_names = list(placeholders)
-    if not placeholder_names:
-        annotations = get_type_hints(node_type, include_extras=True)
-        placeholder_names = [
-            field_name
-            for field_name, annotation in annotations.items()
-            if annotation is Affair
-        ]
     associate_specs = iter_associate_specs(node_type)
     if not placeholder_names:
         return
@@ -59,6 +60,8 @@ def _backfill_declared_affair_placeholders(node_type: type[Any]) -> None:
         if placeholder is None:
             continue
         placeholder_name = placeholder.name
+        if placeholder_name is None:
+            continue
         expected = placeholders.get(placeholder_name)
         if expected is None:
             continue
@@ -91,51 +94,6 @@ def _backfill_declared_affair_placeholders(node_type: type[Any]) -> None:
         setattr(node_type, placeholder_name, generated_affair)
 
 
-class _NodeNamespace(dict[str, Any]):
-    def __init__(self) -> None:
-        super().__init__()
-        self._affair_placeholders: dict[str, AffairPlaceholder] = {}
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        super().__setitem__(key, value)
-        if key == "__annotations__" and isinstance(value, dict):
-            for name, annotation in value.items():
-                if (
-                    _is_affair_placeholder_annotation(annotation)
-                    and name not in self._affair_placeholders
-                ):
-                    placeholder = AffairPlaceholder(name)
-                    self._affair_placeholders[name] = placeholder
-                    super().__setitem__(name, placeholder)
-
-    def __getitem__(self, key: str) -> Any:
-        if key in self:
-            return super().__getitem__(key)
-
-        annotations = super().get("__annotations__", {})
-        if _is_affair_placeholder_annotation(annotations.get(key)):
-            placeholder = self._affair_placeholders.get(key)
-            if placeholder is None:
-                placeholder = AffairPlaceholder(key)
-                self._affair_placeholders[key] = placeholder
-            return placeholder
-        raise KeyError(key)
-
-
-class _NodeInjectionDescriptor:
-    def __init__(self, parent_type: type[Any]) -> None:
-        self.parent_type = parent_type
-
-    def __call__(self, node_type: type[Node]) -> type[Node]:
-        setattr(node_type, INJECT_PARENT_ATTR, self.parent_type)
-        children = getattr(self.parent_type, AUTO_CHILDREN_ATTR, None)
-        if children is None:
-            children = []
-            setattr(self.parent_type, AUTO_CHILDREN_ATTR, children)
-        children.append(node_type)
-        return node_type
-
-
 class NodeMeta(type):
     _affair_placeholders: dict[str, AffairPlaceholder]
 
@@ -146,7 +104,7 @@ class NodeMeta(type):
         bases: tuple[type[Any], ...],
         **kwargs: Any,
     ) -> dict[str, Any]:
-        return _NodeNamespace()
+        return {}
 
     def __new__(
         cls,
@@ -155,14 +113,16 @@ class NodeMeta(type):
         namespace: dict[str, Any],
     ) -> NodeMeta:
         node_type = super().__new__(cls, name, bases, namespace)
-        if isinstance(namespace, _NodeNamespace):
-            node_type._affair_placeholders = namespace._affair_placeholders
+        placeholders = {
+            attr_name: value
+            for attr_name, value in namespace.items()
+            if isinstance(value, AffairPlaceholder)
+        }
+        for attr_name, placeholder in placeholders.items():
+            placeholder.name = attr_name
+        node_type._affair_placeholders = placeholders
         _backfill_declared_affair_placeholders(node_type)
         return node_type
-
-    @property
-    def inject(cls) -> _NodeInjectionDescriptor:
-        return _NodeInjectionDescriptor(cls)
 
 
 class Node(metaclass=NodeMeta):
@@ -194,7 +154,7 @@ class Node(metaclass=NodeMeta):
 
     def attach_dispatcher(self, dispatcher: Any) -> Node:
         self.root._dispatcher = dispatcher
-        self.root._bind_associated_methods()
+        self.root._bind_all_associated_methods()
         return self
 
     def _set_mount(self, *, owner: object, route_name: str, root: Node) -> None:
@@ -203,7 +163,13 @@ class Node(metaclass=NodeMeta):
         self._root = root
         self._is_root = self is root
         self._auto_mount_declared_children()
+        if self.root._dispatcher is not None:
+            self._bind_associated_methods()
+
+    def _bind_all_associated_methods(self) -> None:
         self._bind_associated_methods()
+        for child in self._mounted_children.values():
+            child._bind_all_associated_methods()
 
     def _bind_associated_methods(self) -> None:
         dispatcher = self.root._dispatcher if self._root is not None else None
@@ -402,18 +368,12 @@ def _build_associate_kwargs(
     return kwargs
 
 
-class RootNode(Node):
-    def __init__(self) -> None:
-        super().__init__()
-        self.mark_root()
-
-
 __all__ = [
     "AUTO_CHILDREN_ATTR",
     "INJECT_PARENT_ATTR",
     "Node",
     "ROOT_MARK_ATTR",
-    "RootNode",
+    "child_of",
     "root",
     "route",
 ]
