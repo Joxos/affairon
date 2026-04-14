@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from affairon import Node, child_of, root, route
+from affairon import Node, inject_to, root, route
 
 
 class PhaseRuntime:
@@ -22,7 +22,7 @@ class DuelNode(Node):
 
 
 @route("child")
-@child_of(DuelNode)
+@inject_to(DuelNode)
 class ChildNode(Node):
     pass
 
@@ -34,7 +34,7 @@ class BrokenRootNode(Node):
 
 
 @route("invalid")
-@child_of(BrokenRootNode)
+@inject_to(BrokenRootNode)
 class InvalidChildNode(Node):
     def __init__(self, name: str) -> None:
         super().__init__()

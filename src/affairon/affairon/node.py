@@ -1,8 +1,37 @@
+"""Node tree: hierarchical state composition on top of the affair dispatch layer.
+
+A node tree is a parent-child hierarchy where each node owns its own state,
+declares affairs via ``affair()``, and wires handlers via ``@associate``.
+The tree connects to a :class:`~affairon.Dispatcher` through
+:meth:`Node.attach_dispatcher`, which recursively registers every
+``@associate`` handler as a dispatcher listener.
+
+Key concepts
+------------
+- **Node** -- base class that holds state, children, and a local
+  :class:`~affairon.RuntimeRegistry`.
+- **@route("name")** -- names a node class so it can be mounted as a child
+  under that attribute name.
+- **@root** -- marks a node class as a tree root.  Root nodes auto-mount any
+  children declared with ``inject_to()``.
+- **inject_to(Parent)** -- declares a node class as an auto-mounted child of
+  *Parent*.  Replaces the old ``@Parent.inject`` decorator, which was removed
+  because the method name collided with ``Node.inject()`` (the runtime-registry
+  lookup).  ``inject_to`` is a plain module-level function, so there is no
+  ambiguity.
+- **provide(obj) / inject(Type)** -- per-node runtime registry.  ``provide``
+  stores an object keyed by its type; ``inject`` retrieves it.  This is how
+  helper objects (clocks, configs, caches) are shared within a node's scope.
+  Locators can reach into other nodes' registries when needed.
+- **attach_dispatcher(d)** -- connects the whole tree to a dispatcher,
+  recursively binding all ``@associate`` handlers.
+"""
+
 from __future__ import annotations
 
 import inspect
-from collections.abc import Mapping
-from typing import Any, TypeVar
+from collections.abc import Callable, Mapping
+from typing import Any, Self, TypeVar
 
 from affairon.associate import (
     AffairPlaceholder,
@@ -15,27 +44,71 @@ from affairon.locator import Locator, Parent, Root
 from affairon.runtime import RuntimeRegistry
 
 _T = TypeVar("_T")
+_C = TypeVar("_C")
+_N = TypeVar("_N", bound="Node")
 ROUTE_ATTR = "_affair_route_name"
 INJECT_PARENT_ATTR = "_affair_inject_parent"
 ROOT_MARK_ATTR = "_affair_root_marked"
 AUTO_CHILDREN_ATTR = "_affair_auto_children"
 
 
-def route(name: str):
-    def decorator(obj: Any) -> Any:
+def route(name: str) -> Callable[[_C], _C]:
+    """Name a node class for mounting.
+
+    The route name becomes the attribute name on the parent node::
+
+        @route("counter")
+        class Counter(Node): ...
+
+        root.mount(Counter())  # accessible as root.counter
+    """
+
+    def decorator(obj: _C) -> _C:
         setattr(obj, ROUTE_ATTR, name)
         return obj
 
     return decorator
 
 
-def root(node_type: type[Node]) -> type[Node]:
+def root[N: Node](node_type: type[N]) -> type[N]:
+    """Mark a node class as a tree root.
+
+    Root nodes automatically instantiate and mount any children declared
+    with ``inject_to()`` during ``__init__``::
+
+        @root
+        @route("app")
+        class App(Node): ...
+
+        @inject_to(App)
+        @route("counter")
+        class Counter(Node): ...
+
+        app = App()        # Counter() is already mounted as app.counter
+    """
     setattr(node_type, ROOT_MARK_ATTR, True)
     return node_type
 
 
-def child_of(parent_type: type[Node]):
-    def decorator(node_type: type[Node]) -> type[Node]:
+def inject_to(parent_type: type[Node]) -> Callable[[type[_N]], type[_N]]:
+    """Declare a node class as an auto-mounted child of *parent_type*.
+
+    When the parent is instantiated as a root (or is itself mounted into
+    a tree), every ``inject_to`` child is created with a zero-arg constructor
+    and mounted under its ``@route`` name.
+
+    This replaced the earlier ``@Parent.inject`` decorator.  That API was
+    removed because ``inject`` on a class returned a decorator, while
+    ``inject`` on an instance performed a runtime-registry lookup -- the
+    overloaded name confused both readers and type checkers.  ``inject_to``
+    is a plain function with no ambiguity::
+
+        @inject_to(MemberList)
+        @route("stats")
+        class MemberStats(Node): ...
+    """
+
+    def decorator(node_type: type[_N]) -> type[_N]:
         setattr(node_type, INJECT_PARENT_ATTR, parent_type)
         children = getattr(parent_type, AUTO_CHILDREN_ATTR, None)
         if children is None:
@@ -95,6 +168,14 @@ def _backfill_declared_affair_placeholders(node_type: type[Any]) -> None:
 
 
 class NodeMeta(type):
+    """Metaclass for :class:`Node`.
+
+    Scans class bodies for :class:`AffairPlaceholder` instances (created by
+    ``affair()``) and records them.  After the class is created, pairs each
+    placeholder with its ``@associate`` handler and replaces the placeholder
+    with the generated ``MutableAffair`` subclass.
+    """
+
     _affair_placeholders: dict[str, AffairPlaceholder]
 
     @classmethod
@@ -126,6 +207,22 @@ class NodeMeta(type):
 
 
 class Node(metaclass=NodeMeta):
+    """Base class for all nodes in an affairon node tree.
+
+    A node holds its own state, a set of mounted children, and a local
+    :class:`~affairon.RuntimeRegistry` for ``provide``/``inject``.
+
+    Nodes are composed into a tree.  The tree root is marked with ``@root``
+    (class decorator) or ``mark_root()`` (instance call).  Children are either
+    declared with ``inject_to(Parent)`` (auto-mounted) or attached at runtime
+    with ``mount()``.  Once the tree is connected to a
+    :class:`~affairon.Dispatcher` via ``attach_dispatcher()``, all
+    ``@associate`` handlers are registered as dispatcher listeners.
+
+    Handlers can also be called directly as regular methods -- they work
+    both as affair-dispatched callbacks and as plain method calls.
+    """
+
     def __init__(self) -> None:
         self._runtime_registry = RuntimeRegistry()
         self._mounted_children: dict[str, Node] = {}
@@ -140,19 +237,47 @@ class Node(metaclass=NodeMeta):
             self._auto_mount_declared_children()
 
     def provide(self, runtime: _T) -> _T:
+        """Store *runtime* in this node's local registry, keyed by its type.
+
+        Other nodes can retrieve it via ``inject()`` on the same node, or
+        from a different node using a Locator path expression (e.g.
+        ``Annotated[Clock, Root / Clock]``).
+
+        Returns the stored object for chaining convenience.
+        """
         return self._runtime_registry.provide(runtime)
 
     def inject(self, key: type[_T]) -> _T:
+        """Retrieve an object previously stored with ``provide()``.
+
+        Raises :class:`LookupError` if *key* was never provided on this node.
+        For cross-node lookups, use Locator path expressions on ``@associate``
+        parameters instead of calling ``inject()`` directly.
+        """
         return self._runtime_registry.inject(key)
 
-    def mark_root(self) -> Node:
+    def mark_root(self) -> Self:
+        """Mark this instance as a tree root (alternative to ``@root``).
+
+        Useful when you need a plain ``Node()`` as root without defining
+        a dedicated subclass::
+
+            root = Node().mark_root()
+            root.mount(SomeChild())
+        """
         self._is_root = True
         self._root = self
         self._auto_mount_declared_children()
         self._bind_associated_methods()
         return self
 
-    def attach_dispatcher(self, dispatcher: Any) -> Node:
+    def attach_dispatcher(self, dispatcher: Any) -> Self:
+        """Connect the entire node tree to *dispatcher*.
+
+        Walks every node in the tree and registers each ``@associate``
+        handler as a listener on the dispatcher.  After this call, emitting
+        an affair through the dispatcher triggers the matching node handler.
+        """
         self.root._dispatcher = dispatcher
         self.root._bind_all_associated_methods()
         return self
@@ -232,6 +357,18 @@ class Node(metaclass=NodeMeta):
         setattr(self, route_name, child)
 
     def mount(self, node: Node) -> Node:
+        """Mount *node* as a child of this node at runtime.
+
+        The child's ``@route`` name determines the attribute name.  For
+        declarative mounting, prefer ``inject_to()`` instead -- ``mount()``
+        is for cases where the child is created dynamically::
+
+            room = Room()                # @root, auto-mounts declared children
+            room.mount(ExtraPlugin())    # add a child that wasn't declared
+
+        Raises :class:`ValueError` if this node is not part of a tree or
+        the route name is already taken.
+        """
         if self._root is None:
             raise ValueError(f"{type(self).__name__} is not attached to a root")
         route_name = _require_route_name(type(node))
@@ -248,6 +385,12 @@ class Node(metaclass=NodeMeta):
         return node
 
     def resolve(self, locator: Locator, expected_type: type[_T]) -> _T:
+        """Resolve a :class:`~affairon.Locator` path expression from this node.
+
+        Typically you don't call this directly -- ``@associate`` handlers
+        use ``Annotated[T, Root / T]`` parameter hints, and the framework
+        calls ``resolve`` under the hood.
+        """
         if self._root is None:
             raise ValueError(f"{type(self).__name__} is not attached to a root")
         return self._root._resolve_from(locator, expected_type, start=self)
@@ -373,7 +516,7 @@ __all__ = [
     "INJECT_PARENT_ATTR",
     "Node",
     "ROOT_MARK_ATTR",
-    "child_of",
+    "inject_to",
     "root",
     "route",
 ]

@@ -32,16 +32,13 @@ known-first-party = ["affairon"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/affairon/affairon/__init__.py" = ["E402"]
-"src/affairon/examples/duel/duelsample/duelsample/nodes.py" = ["F821"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/affairon/tests"]
 asyncio_mode = "auto"
 
 [tool.pyright]
-exclude = ["**/.venv", "src/affairon/examples/duel/**"]
+exclude = ["**/.venv", "src/affairon/examples/**"]
 extraPaths = [
     "src/affairon/tests",
-    "src/affairon/examples/duel/duelsample",
-    "src/affairon/examples/egg/eggsample",
 ]

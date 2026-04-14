@@ -354,6 +354,132 @@ class Handler(AffairAware):
 
 ---
 
+## Node system
+
+The node system adds hierarchical state composition on top of the event layer.
+Nodes form a tree where each node owns its own state, declares affairs via
+`affair()`, and wires handlers via `@associate`.
+
+### Core concepts
+
+| Concept | What it does |
+|---|---|
+| `Node` | Base class.  Holds state, children, and a local runtime registry. |
+| `@route("name")` | Names a node class so it can be mounted as a child under that attribute name. |
+| `@root` | Marks a node class as a tree root.  Root nodes auto-mount declared children on construction. |
+| `inject_to(Parent)` | Declares a node class as an auto-mounted child of `Parent`. |
+| `affair()` | Declares an affair slot on a node class (like `enum.auto()`).  `@associate` fills it with a generated `MutableAffair` subclass. |
+| `@associate(SomeAffair)` | Binds a method as the handler for `SomeAffair`.  When the tree is connected to a dispatcher, the method is registered as a listener.  It can also be called directly. |
+| `provide(obj)` / `inject(Type)` | Per-node type-keyed store.  `provide` stores an object by its type; `inject` retrieves it. |
+| `Root / Type`, `Parent / Type` | Locator path expressions.  Used in `Annotated[T, Root / T]` type hints on `@associate` parameters to inject objects from other nodes in the tree. |
+| `attach_dispatcher(d)` | Connects the entire tree to a `Dispatcher`, recursively registering all `@associate` handlers. |
+
+### Why inject_to() instead of @Parent.inject
+
+Earlier versions used `@Parent.inject` as a decorator to declare parent-child
+relationships.  This was removed because `inject` on a class returned a
+decorator (for declaring children), while `inject` on an instance performed a
+runtime-registry lookup (for retrieving provided objects).  The overloaded name
+confused both readers and type checkers.  `inject_to()` is a plain function
+with no ambiguity.
+
+### provide() and inject()
+
+Each node has a local runtime registry -- a simple type-keyed dictionary.
+`provide(obj)` stores an object keyed by `type(obj)`; `inject(Type)` retrieves
+it.  This is how you share helper objects (clocks, configs, caches) within a
+node's scope without putting them as attributes on the node itself.
+
+To access another node's registry, `@associate` handlers use locator path
+expressions: `Annotated[Clock, Root / Clock]` tells the framework "go to the
+root node, call `inject(Clock)` there, and pass the result as this parameter."
+The handler doesn't need to know the tree structure beyond what its annotation
+declares.
+
+### Defining a node
+
+```python
+from affairon import Node, affair, associate, route
+
+@route("counter")
+class Counter(Node):
+    def __init__(self) -> None:
+        super().__init__()
+        self.value = 0
+
+    IncrementAffair = affair()
+
+    @associate(IncrementAffair)
+    def increment(self, amount: int) -> dict[str, int]:
+        self.value += amount
+        return {"value": self.value}
+```
+
+`affair()` creates a placeholder. When `NodeMeta` processes the class,
+it sees that `@associate(IncrementAffair)` targets that placeholder and
+generates a `MutableAffair` subclass with fields `node: object` and
+`amount: int` (inferred from the method signature). The generated class
+is then written back to `Counter.IncrementAffair`.
+
+### Building a tree
+
+```python
+from affairon import Dispatcher, Node, inject_to, root, route
+
+@root
+@route("app")
+class App(Node):
+    pass
+
+@inject_to(App)
+@route("counter")
+class Counter(Node):
+    ...  # as above
+
+app = App()                          # auto-mounts Counter as app.counter
+app.provide(SomeRuntime())           # store a runtime in the root's registry
+app.attach_dispatcher(Dispatcher())  # wire all @associate handlers
+
+app.counter.increment(5)             # direct call -- no dispatcher involved
+```
+
+### Cross-node injection with locators
+
+When an `@associate` method needs data from another node, annotate the
+parameter with a locator path:
+
+```python
+from typing import Annotated
+from affairon import Root, Parent
+
+@associate(RecordAffair)
+def record(
+    self,
+    msg: str,
+    clock: Annotated[Clock, Root / Clock],         # root's registry
+    parent: Annotated[Owner, Parent / Owner],       # parent node
+) -> dict[str, int]:
+    ...
+```
+
+`Root / Clock` means "start from the tree root, call `inject(Clock)`."
+`Parent / Owner` means "go to this node's parent, resolve `Owner` there."
+The `/` operator composes path segments; you can chain route names and types
+to navigate deeper: `Root / "members" / MemberList`.
+
+### Full example
+
+See `examples/nodes/` for a complete chat-room example that exercises every
+node feature:
+
+```bash
+cd examples/nodes/nodesample
+uv sync
+uv run fairun .
+```
+
+---
+
 ## Design Tradeoffs
 
 This paradigm is not "universal," but its gains and costs are both clear:

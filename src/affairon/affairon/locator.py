@@ -1,3 +1,32 @@
+"""Locator path expressions for cross-node resolution.
+
+Locators let ``@associate`` handlers declare dependencies on objects living
+in other nodes.  The ``/`` operator composes path segments into a
+:class:`Locator`, which the node tree resolves at call time.
+
+Two anchors are provided:
+
+- ``Root`` -- start from the tree root.
+- ``Parent`` -- start from the current node's parent.
+
+Segments can be types (resolved via ``inject()`` or route lookup) or
+strings (resolved as attribute names / route names).
+
+Example::
+
+    from typing import Annotated
+    from affairon import Root, Parent
+
+    @associate(RecordAffair)
+    def record(
+        self,
+        msg: str,
+        clock: Annotated[Clock, Root / Clock],           # root's registry
+        parent: Annotated[MemberList, Parent / MemberList],  # parent node
+    ) -> dict[str, int]:
+        ...
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

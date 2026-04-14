@@ -1,3 +1,28 @@
+"""Affair association: binding node methods to generated affairs.
+
+This module provides the ``affair()`` factory and the ``@associate`` decorator.
+Together they let a node class declare an affair slot and bind a handler in
+two lines::
+
+    class Counter(Node):
+        IncrementAffair = affair()
+
+        @associate(IncrementAffair)
+        def increment(self, amount: int) -> dict[str, int]:
+            ...
+
+``affair()`` returns an :class:`AffairPlaceholder`.  When
+:class:`~affairon.node.NodeMeta` processes the class, it sees that
+``@associate(IncrementAffair)`` targets that placeholder and generates a
+``MutableAffair`` subclass with fields inferred from the handler's signature
+(here: ``node: object, amount: int``).  The generated class is written back
+to ``Counter.IncrementAffair``, replacing the placeholder.
+
+The handler works as both a dispatcher-triggered callback (when the tree is
+connected to a :class:`~affairon.Dispatcher`) and a plain method call
+(``counter.increment(5)``).
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -15,11 +40,34 @@ ASSOCIATE_SPEC_ATTR = "_affair_associate_spec"
 
 
 class AffairPlaceholder:
+    """Sentinel returned by ``affair()`` to mark an affair slot.
+
+    During class creation, :class:`~affairon.node.NodeMeta` replaces each
+    placeholder with the generated ``MutableAffair`` subclass produced by
+    the matching ``@associate`` handler.
+    """
+
     def __init__(self, name: str | None = None) -> None:
         self.name = name
 
 
 def affair() -> type[MutableAffair]:
+    """Declare an affair slot on a node class.
+
+    Works like ``enum.auto()`` -- call it in the class body, assign to a
+    class variable, and pair it with ``@associate``::
+
+        class MyNode(Node):
+            DoSomethingAffair = affair()
+
+            @associate(DoSomethingAffair)
+            def do_something(self, x: int) -> dict[str, int]:
+                return {"x": x}
+
+    The placeholder is replaced with a real ``MutableAffair`` subclass
+    after the class is created.  The generated affair has fields inferred
+    from the handler's parameter signature.
+    """
     return AffairPlaceholder()  # type: ignore[return-value]
 
 
@@ -41,19 +89,14 @@ def _build_generated_affair(
     func: Callable[..., Any],
     affair_type: type[Any],
 ) -> type[MutableAffair]:
-    generated_name: str
-    if isinstance(affair_type, AffairPlaceholder):
-        generated_name = (
-            affair_type.name or f"{func.__qualname__.replace('.', '')}Affair"
-        )
-    elif isinstance(affair_type, type) and issubclass(affair_type, MutableAffair):
+    if isinstance(affair_type, type) and issubclass(affair_type, MutableAffair):
         return affair_type
-    else:
-        generated_name = (
-            affair_type.__name__
-            if isinstance(affair_type, type)
-            else f"{func.__qualname__.replace('.', '')}Affair"
+    if not isinstance(affair_type, AffairPlaceholder):
+        raise TypeError(
+            f"@associate expects an affair() placeholder or a MutableAffair subclass, "
+            f"got {affair_type!r}"
         )
+    generated_name = affair_type.name or f"{func.__qualname__.replace('.', '')}Affair"
 
     field_definitions: dict[str, Any] = {"node": (object, ...)}
     for name, parameter in signature(func).parameters.items():
@@ -115,6 +158,23 @@ def associate(
     *,
     expose_as: str | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Bind a node method as the handler for *affair_type*.
+
+    *affair_type* is either an ``affair()`` placeholder or a concrete
+    ``MutableAffair`` subclass.  When the node tree is connected to a
+    dispatcher, the decorated method is auto-registered as a listener.
+    The method can also be called directly as a plain method.
+
+    Parameters annotated with ``Annotated[T, Root / T]`` or similar locator
+    expressions are injected automatically -- both when called via the
+    dispatcher and when called directly.
+
+    Args:
+        affair_type: An ``affair()`` placeholder or ``MutableAffair`` subclass.
+        expose_as: Optional name to expose the generated affair class as a
+            class attribute on the node.
+    """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         placeholder = (
             affair_type if isinstance(affair_type, AffairPlaceholder) else None

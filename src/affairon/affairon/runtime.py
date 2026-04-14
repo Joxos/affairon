@@ -1,3 +1,21 @@
+"""Runtime registry and injection primitives.
+
+Each :class:`~affairon.Node` owns a :class:`RuntimeRegistry` instance.
+``provide(obj)`` stores an object keyed by its type; ``inject(Type)``
+retrieves it.  This is how plain helper objects (clocks, configs, caches)
+are shared within a node's scope without polluting the node's own attributes.
+
+For ``@associate`` handlers, parameters with non-builtin type annotations
+that are not already supplied by the caller are resolved automatically:
+
+- Plain types (``Clock``) -- resolved via ``node.inject(Clock)``.
+- ``Annotated[Clock, Root / Clock]`` -- resolved via the locator path,
+  reaching into another node's registry.
+
+The :func:`inject_from` decorator provides the same injection mechanism
+for standalone functions outside the node system.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable

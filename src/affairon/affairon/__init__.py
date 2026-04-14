@@ -39,7 +39,7 @@ from affairon.exceptions import (
 )
 from affairon.listen import listen
 from affairon.locator import Parent, Root
-from affairon.node import Node, child_of, root, route
+from affairon.node import Node, inject_to, root, route
 from affairon.runtime import RuntimeRegistry, inject_from
 
 # Module-level default dispatcher singletons
@@ -66,7 +66,7 @@ __all__ = [
     "associate",
     "route",
     "root",
-    "child_of",
+    "inject_to",
     "Node",
     "Root",
     "Parent",
