@@ -21,6 +21,7 @@ from affairon.affairs import (
     MetaAffair,
     MutableAffair,
 )
+from affairon.associate import associate
 from affairon.async_dispatcher import AsyncDispatcher
 from affairon.aware import AffairAware
 from affairon.dispatcher import Dispatcher
@@ -38,6 +39,9 @@ from affairon.exceptions import (
     PluginVersionError,
 )
 from affairon.listen import listen
+from affairon.locator import Parent, Root
+from affairon.node import Node, RootNode, root, route
+from affairon.runtime import RuntimeRegistry, inject_from
 
 # Module-level default dispatcher singletons
 default_dispatcher = Dispatcher()
@@ -60,6 +64,15 @@ __all__ = [
     "default_dispatcher",
     "default_async_dispatcher",
     "listen",
+    "associate",
+    "route",
+    "root",
+    "Node",
+    "RootNode",
+    "Root",
+    "Parent",
+    "RuntimeRegistry",
+    "inject_from",
     # Exception classes
     "AffairError",
     "AffairValidationError",

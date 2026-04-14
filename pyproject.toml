@@ -5,8 +5,8 @@ target-version = "py312"
 package = false
 
 [tool.uv.workspace]
-members = ["src/affairon", "src/conceron"]
-exclude = ["src/affairon/examples", "src/conceron/examples"]
+members = ["src/affairon"]
+exclude = ["src/affairon/examples"]
 
 [dependency-groups]
 dev = [
@@ -28,18 +28,20 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["affairon", "conceron"]
+known-first-party = ["affairon"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/affairon/affairon/__init__.py" = ["E402"]
+"src/affairon/examples/duel/duelsample/duelsample/nodes.py" = ["F821"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/affairon/tests"]
 asyncio_mode = "auto"
 
 [tool.pyright]
-exclude = ["**/.venv"]
+exclude = ["**/.venv", "src/affairon/examples/duel/**"]
 extraPaths = [
     "src/affairon/tests",
+    "src/affairon/examples/duel/duelsample",
     "src/affairon/examples/egg/eggsample",
 ]
