@@ -2,21 +2,18 @@
 
 This module provides the ``affair()`` factory and the ``@associate`` decorator.
 Together they let a node class declare an affair slot and bind a handler in
-two lines::
+one line::
 
     class Counter(Node):
-        IncrementAffair = affair()
-
-        @associate(IncrementAffair)
+        @associate(IncrementAffair := affair())
         def increment(self, amount: int) -> dict[str, int]:
             ...
 
-``affair()`` returns an :class:`AffairPlaceholder`.  When
-:class:`~affairon.node.NodeMeta` processes the class, it sees that
-``@associate(IncrementAffair)`` targets that placeholder and generates a
-``MutableAffair`` subclass with fields inferred from the handler's signature
-(here: ``node: object, amount: int``).  The generated class is written back
-to ``Counter.IncrementAffair``, replacing the placeholder.
+``affair()`` returns an internal declaration token that ``@associate`` consumes.
+When :class:`~affairon.node.NodeMeta` processes the class, it finds the token
+bound in the class namespace, generates a ``MutableAffair`` subclass with fields
+inferred from the handler's signature (here: ``node: object, amount: int``),
+and writes it back to ``Counter.IncrementAffair``.
 
 The handler works as both a dispatcher-triggered callback (when the tree is
 connected to a :class:`~affairon.Dispatcher`) and a plain method call
@@ -42,13 +39,8 @@ _SIGNATURE_ATTR = "__signature__"
 _R = TypeVar("_R")
 
 
-class AffairPlaceholder:
-    """Sentinel returned by ``affair()`` to mark an affair slot.
-
-    During class creation, :class:`~affairon.node.NodeMeta` replaces each
-    placeholder with the generated ``MutableAffair`` subclass produced by
-    the matching ``@associate`` handler.
-    """
+class _AffairToken:
+    """Internal declaration token returned by ``affair()``."""
 
     def __init__(self, name: str | None = None) -> None:
         self.name: str | None = name
@@ -57,45 +49,38 @@ class AffairPlaceholder:
 def affair() -> type[MutableAffair]:
     """Declare an affair slot on a node class.
 
-    Works like ``enum.auto()`` -- call it in the class body, assign to a
-    class variable, and pair it with ``@associate``::
+    Call it inline inside ``@associate`` using a walrus assignment::
 
         class MyNode(Node):
-            DoSomethingAffair = affair()
-
-            @associate(DoSomethingAffair)
+            @associate(DoSomethingAffair := affair())
             def do_something(self, x: int) -> dict[str, int]:
                 return {"x": x}
 
-    The placeholder is replaced with a real ``MutableAffair`` subclass
-    after the class is created.  The generated affair has fields inferred
-    from the handler's parameter signature.
+    The declaration token is consumed during class creation. The walrus target
+    name becomes the class attribute that receives the generated affair class.
     """
-    return AffairPlaceholder()
+    return cast(type[MutableAffair], _AffairToken())
 
 
 class AssociateSpec:
     affair_type: type[MutableAffair]
     callback: Callable[..., object]
-    expose_as: str | None
-    placeholder: AffairPlaceholder | None
+    token: _AffairToken | None
 
     def __init__(
         self,
         affair_type: type[MutableAffair],
         callback: Callable[..., object],
-        expose_as: str | None,
-        placeholder: AffairPlaceholder | None,
+        token: _AffairToken | None,
     ) -> None:
         self.affair_type = affair_type
         self.callback = callback
-        self.expose_as = expose_as
-        self.placeholder = placeholder
+        self.token = token
 
 
 def _build_generated_affair(
     func: Callable[..., object],
-    affair_type: type[MutableAffair] | AffairPlaceholder,
+    affair_type: type[MutableAffair] | _AffairToken,
 ) -> type[MutableAffair]:
     if isinstance(affair_type, type):
         return affair_type
@@ -205,12 +190,10 @@ def _build_user_signature(func: Callable[..., object]) -> Signature:
 
 def associate(
     affair_type: object,
-    *,
-    expose_as: str | None = None,
 ) -> Callable[[Callable[..., _R]], Callable[..., _R]]:
     """Bind a node method as the handler for *affair_type*.
 
-    *affair_type* is either an ``affair()`` placeholder or a concrete
+    *affair_type* is either an ``affair()`` declaration token or a concrete
     ``MutableAffair`` subclass.  When the node tree is connected to a
     dispatcher, the decorated method is auto-registered as a listener.
     The method can also be called directly as a plain method.
@@ -220,17 +203,13 @@ def associate(
     dispatcher and when called directly.
 
     Args:
-        affair_type: An ``affair()`` placeholder or ``MutableAffair`` subclass.
-        expose_as: Optional name to expose the generated affair class as a
-            class attribute on the node.
+        affair_type: An ``affair()`` declaration token or ``MutableAffair`` subclass.
     """
 
-    if not isinstance(affair_type, AffairPlaceholder) and not (
+    if not isinstance(affair_type, _AffairToken) and not (
         isinstance(affair_type, type) and issubclass(affair_type, MutableAffair)
     ):
-        raise TypeError(
-            "@associate expects an affair() placeholder or MutableAffair subclass"
-        )
+        raise TypeError("@associate expects affair() or a MutableAffair subclass")
     typed_affair_type = affair_type
 
     class _AssociateNode(Protocol):
@@ -239,10 +218,8 @@ def associate(
         def inject(self, key: type[object]) -> object: ...
 
     def decorator(func: Callable[..., _R]) -> Callable[..., _R]:
-        placeholder = (
-            typed_affair_type
-            if isinstance(typed_affair_type, AffairPlaceholder)
-            else None
+        token = (
+            typed_affair_type if isinstance(typed_affair_type, _AffairToken) else None
         )
         generated_affair = _build_generated_affair(func, typed_affair_type)
         user_sig = _build_user_signature(func)
@@ -288,7 +265,7 @@ def associate(
             setattr(
                 async_wrapper,
                 ASSOCIATE_SPEC_ATTR,
-                AssociateSpec(generated_affair, async_wrapper, expose_as, placeholder),
+                AssociateSpec(generated_affair, async_wrapper, token),
             )
             setattr(
                 async_wrapper,
@@ -319,7 +296,7 @@ def associate(
         setattr(
             sync_wrapper,
             ASSOCIATE_SPEC_ATTR,
-            AssociateSpec(generated_affair, sync_wrapper, expose_as, placeholder),
+            AssociateSpec(generated_affair, sync_wrapper, token),
         )
         setattr(
             sync_wrapper,
@@ -335,7 +312,6 @@ def associate(
 
 __all__ = [
     "ASSOCIATE_SPEC_ATTR",
-    "AffairPlaceholder",
     "AssociateSpec",
     "rename_generated_affair",
     "affair",

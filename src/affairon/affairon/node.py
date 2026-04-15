@@ -36,7 +36,7 @@ from typing import Protocol, Self, TypeVar, cast, override
 from affairon._types import SyncCallback
 from affairon.affairs import MutableAffair
 from affairon.associate import (
-    AffairPlaceholder,
+    _AffairToken,
     get_associate_spec,
     iter_associate_specs,
     rename_generated_affair,
@@ -125,66 +125,49 @@ def inject_to(parent_type: type[Node]) -> Callable[[type[_N]], type[_N]]:
     return decorator
 
 
-def _backfill_declared_affair_placeholders(node_type: type[object]) -> None:
-    placeholders = cast(
-        dict[str, AffairPlaceholder], getattr(node_type, "_affair_placeholders", {})
-    )
-    placeholder_names = list(placeholders)
+def _backfill_generated_affairs(node_type: type[object]) -> None:
     associate_specs = iter_associate_specs(node_type)
-    if not placeholder_names:
-        return
-
-    claimed_by_identity: set[str] = set()
-    for _method_name, spec in associate_specs:
-        placeholder = spec.placeholder
-        if placeholder is None:
-            continue
-        placeholder_name = placeholder.name
-        if placeholder_name is None:
-            continue
-        expected = placeholders.get(placeholder_name)
-        if expected is None:
-            continue
-        if expected is not placeholder:
-            raise TypeError(
-                "@associate placeholder"
-                + f" '{placeholder_name}'"
-                + f" is not declared on {node_type.__name__}"
-            )
-        setattr(node_type, placeholder_name, spec.affair_type)
-        claimed_by_identity.add(placeholder_name)
 
     claims: dict[str, type[MutableAffair]] = {}
     for _method_name, spec in associate_specs:
-        if spec.expose_as is None:
+        token = spec.token
+        if token is None:
             continue
-        if spec.expose_as in claims:
+        token_name = token.name
+        if token_name is None:
             raise TypeError(
-                f"Multiple @associate methods claim the placeholder '{spec.expose_as}'"
+                "@associate(affair()) requires a walrus-bound class attribute name"
             )
-        claims[spec.expose_as] = spec.affair_type
+        if token_name in claims:
+            raise TypeError(
+                f"Multiple @associate methods claim the affair '{token_name}'"
+            )
+        claims[token_name] = spec.affair_type
 
-    for placeholder_name in placeholder_names:
-        if placeholder_name in claimed_by_identity:
-            continue
-        generated_affair = claims.get(placeholder_name)
-        if generated_affair is None:
-            continue
-        if generated_affair.__name__ != placeholder_name:
-            _ = rename_generated_affair(generated_affair, placeholder_name)
-        setattr(node_type, placeholder_name, generated_affair)
+    namespace = cast(Mapping[str, object], vars(node_type))
+    for token_name, generated_affair in claims.items():
+        bound = namespace.get(token_name)
+        if bound is None:
+            raise TypeError(
+                f"Associated affair '{token_name}' is not bound in class namespace"
+            )
+        if not isinstance(bound, _AffairToken):
+            raise TypeError(
+                "Associated affair"
+                + f" '{token_name}'"
+                + " must be declared with walrus-bound affair()"
+            )
+
+        if generated_affair.__name__ != token_name:
+            _ = rename_generated_affair(generated_affair, token_name)
+        setattr(node_type, token_name, generated_affair)
 
 
 class NodeMeta(type):
     """Metaclass for :class:`Node`.
 
-    Scans class bodies for :class:`AffairPlaceholder` instances (created by
-    ``affair()``) and records them.  After the class is created, pairs each
-    placeholder with its ``@associate`` handler and replaces the placeholder
-    with the generated ``MutableAffair`` subclass.
+    Replaces walrus-bound ``affair()`` tokens with generated affair classes.
     """
-
-    _affair_placeholders: dict[str, AffairPlaceholder] = {}
 
     @classmethod
     @override
@@ -203,15 +186,14 @@ class NodeMeta(type):
         namespace: dict[str, object],
     ) -> NodeMeta:
         node_type = cast(NodeMeta, super().__new__(cls, name, bases, namespace))
-        placeholders = {
+        declared_tokens = {
             attr_name: value
             for attr_name, value in namespace.items()
-            if isinstance(value, AffairPlaceholder)
+            if isinstance(value, _AffairToken)
         }
-        for attr_name, placeholder in placeholders.items():
-            placeholder.name = attr_name
-        node_type._affair_placeholders = placeholders
-        _backfill_declared_affair_placeholders(cast(type[object], node_type))
+        for attr_name, token in declared_tokens.items():
+            token.name = attr_name
+        _backfill_generated_affairs(cast(type[object], node_type))
         return node_type
 
 

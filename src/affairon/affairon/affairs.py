@@ -5,7 +5,7 @@ and framework meta-affairs (AffairMain, CallbackErrorAffair, etc.).
 """
 
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, final
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
