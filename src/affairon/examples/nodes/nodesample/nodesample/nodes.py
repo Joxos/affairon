@@ -26,17 +26,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from affairon import (
-    Dispatcher,
-    Node,
-    Parent,
-    Root,
-    affair,
-    associate,
-    inject_to,
-    root,
-    route,
-)
+from affairon import MutableAffair, Node, Parent, Root, affair, associate, inject_to, root, route
 
 
 class Clock:
@@ -48,7 +38,7 @@ class Clock:
     """
 
     def __init__(self) -> None:
-        self.tick = 0
+        self.tick: int = 0
 
     def advance(self) -> int:
         self.tick += 1
@@ -80,7 +70,7 @@ class MessageLog(Node):
         super().__init__()
         self.entries: list[dict[str, str | int]] = []
 
-    RecordAffair = affair()
+    RecordAffair: type[MutableAffair] = affair()
 
     @associate(RecordAffair)
     def record(
@@ -88,7 +78,7 @@ class MessageLog(Node):
         sender: str,
         text: str,
         clock: Annotated[Clock, Root / Clock],
-    ) -> dict[str, int]:
+    ) -> None:
         """Record a message.  The clock parameter is injected automatically.
 
         ``Root / Clock`` means: starting from the tree root, call
@@ -97,7 +87,6 @@ class MessageLog(Node):
         """
         ts = clock.advance()
         self.entries.append({"sender": sender, "text": text, "ts": ts})
-        return {"ts": ts}
 
 
 @inject_to(Room)
@@ -111,18 +100,12 @@ class MemberList(Node):
     KickAffair = affair()
 
     @associate(JoinAffair)
-    def join(self, name: str) -> dict[str, bool]:
-        if name in self.names:
-            return {"joined": False}
+    def join(self, name: str) -> None:
         self.names.append(name)
-        return {"joined": True}
 
     @associate(KickAffair)
-    def kick(self, name: str) -> dict[str, bool]:
-        if name not in self.names:
-            return {"kicked": False}
+    def kick(self, name: str) -> None:
         self.names.remove(name)
-        return {"kicked": True}
 
 
 # -- Second-level child (grandchild of Room) ---------------------------------
@@ -144,7 +127,7 @@ class MemberStats(Node):
         self,
         name: str,
         members: Annotated[MemberList, Parent / MemberList],
-    ) -> dict[str, int]:
+    ) -> None:
         """Bump message count for a member.
 
         ``Parent / MemberList`` means: go to this node's parent, and since
@@ -155,48 +138,3 @@ class MemberStats(Node):
         if name not in members.names:
             raise ValueError(f"{name} is not a member")
         self.counts[name] = self.counts.get(name, 0) + 1
-        return {"count": self.counts[name]}
-
-
-def build_room() -> tuple[Room, Dispatcher]:
-    """Build and wire a complete chat room.
-
-    1. Create the room -- @root auto-mounts MessageLog, MemberList, and
-       MemberStats (as a grandchild via inject_to chain).
-    2. Provide a Clock to the root's runtime registry.
-    3. Attach a dispatcher so @associate handlers are registered as listeners.
-    """
-    dispatcher = Dispatcher()
-    room = Room()
-    room.provide(Clock())
-    room.attach_dispatcher(dispatcher)
-    return room, dispatcher
-
-
-def demo() -> dict[str, object]:
-    room, _dispatcher = build_room()
-
-    # Direct method calls -- no dispatcher.emit() needed.
-    # The methods work as plain calls; injection still happens.
-    room.members.join("Alice")
-    room.members.join("Bob")
-
-    room.log.record("Alice", "hello everyone")
-    room.members.stats.bump("Alice")
-
-    room.log.record("Bob", "hey Alice!")
-    room.members.stats.bump("Bob")
-
-    room.log.record("Alice", "let's kick Eve")
-    room.members.stats.bump("Alice")
-
-    room.members.join("Eve")
-    room.members.kick("Eve")
-
-    return {
-        "members": list(room.members.names),
-        "log_count": len(room.log.entries),
-        "alice_msgs": room.members.stats.counts.get("Alice", 0),
-        "bob_msgs": room.members.stats.counts.get("Bob", 0),
-        "clock": room.inject(Clock).tick,
-    }

@@ -33,7 +33,7 @@ import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol, Self, TypeVar, cast, override
 
-from affairon._types import AsyncCallback, SyncCallback
+from affairon._types import SyncCallback
 from affairon.affairs import MutableAffair
 from affairon.associate import (
     AffairPlaceholder,
@@ -41,7 +41,8 @@ from affairon.associate import (
     iter_associate_specs,
     rename_generated_affair,
 )
-from affairon.aware import DispatcherLike, validate_listener_mode
+from affairon.aware import validate_listener_mode
+from affairon.dispatcher import Dispatcher
 from affairon.locator import Locator, Parent, Root
 from affairon.runtime import RuntimeRegistry
 
@@ -233,15 +234,13 @@ class Node(metaclass=NodeMeta):
 
     _runtime_registry: RuntimeRegistry
     _is_root: bool
-    _associate_registrations: list[
-        tuple[DispatcherLike, type[MutableAffair], SyncCallback | AsyncCallback]
-    ]
+    _associate_registrations: list[tuple[object, type[MutableAffair], object]]
 
     def __init__(self) -> None:
         self._runtime_registry = RuntimeRegistry()
         self._mounted_children: dict[str, Node] = {}
         self._associate_registrations = []
-        self._dispatcher: DispatcherLike | None = None
+        self._dispatcher: Dispatcher | None = None
         self._owner: object | None = None
         self._route_name: str | None = None
         self._root: Node | None = None
@@ -285,7 +284,7 @@ class Node(metaclass=NodeMeta):
         self._bind_associated_methods()
         return self
 
-    def attach_dispatcher(self, dispatcher: DispatcherLike) -> Self:
+    def attach_dispatcher(self, dispatcher: Dispatcher) -> Self:
         """Connect the entire node tree to *dispatcher*.
 
         Walks every node in the tree and registers each ``@associate``
@@ -334,7 +333,7 @@ class Node(metaclass=NodeMeta):
                     return getattr(affair, "node", None) is self
 
                 callback = _build_associate_callback(bound)
-                typed_callback = cast(SyncCallback | AsyncCallback, callback)
+                typed_callback = cast(SyncCallback, callback)
                 dispatcher.register(spec.affair_type, typed_callback, when=when)
                 self._associate_registrations.append(
                     (dispatcher, spec.affair_type, typed_callback)

@@ -27,8 +27,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from functools import wraps
-from inspect import BoundArguments, iscoroutinefunction, signature
-from typing import Protocol, cast
+from inspect import BoundArguments, Parameter, Signature, iscoroutinefunction, signature
+from typing import Protocol, TypeVar, cast
 
 from pydantic import create_model
 
@@ -37,6 +37,9 @@ from affairon.listen import LISTEN_SPEC_ATTR, ListenSpec
 from affairon.runtime import resolve_injected_kwargs
 
 ASSOCIATE_SPEC_ATTR = "_affair_associate_spec"
+_SIGNATURE_ATTR = "__signature__"
+
+_R = TypeVar("_R")
 
 
 class AffairPlaceholder:
@@ -68,7 +71,7 @@ def affair() -> type[MutableAffair]:
     after the class is created.  The generated affair has fields inferred
     from the handler's parameter signature.
     """
-    return AffairPlaceholder()  # pyright: ignore[reportReturnType]  # type: ignore[return-value]
+    return AffairPlaceholder()
 
 
 class AssociateSpec:
@@ -156,11 +159,55 @@ def iter_associate_specs(cls: type[object]) -> list[tuple[str, AssociateSpec]]:
     return specs
 
 
+def _is_injected_param(param: Parameter) -> bool:
+    from typing import Annotated, get_args, get_origin
+
+    from affairon.locator import Locator
+
+    annotation = param.annotation
+    if annotation is Parameter.empty:
+        return False
+
+    if get_origin(annotation) is Annotated:
+        args = get_args(annotation)
+        for arg in args[1:]:
+            if isinstance(arg, Locator):
+                return True
+        return False
+
+    if isinstance(annotation, type) and annotation.__module__ != "builtins":
+        return True
+
+    return False
+
+
+def _build_user_signature(func: Callable[..., object]) -> Signature:
+    from typing import get_type_hints
+
+    sig = signature(func)
+    try:
+        hints = get_type_hints(func, include_extras=True)
+    except Exception:
+        return sig
+
+    user_params: list[Parameter] = []
+    for name, param in sig.parameters.items():
+        if name in ("self", "cls", "affair"):
+            user_params.append(param)
+            continue
+        resolved = param.replace(annotation=hints.get(name, param.annotation))
+        if _is_injected_param(resolved):
+            continue
+        user_params.append(param)
+
+    return sig.replace(parameters=user_params)
+
+
 def associate(
     affair_type: object,
     *,
     expose_as: str | None = None,
-) -> Callable[[Callable[..., object]], Callable[..., object]]:
+) -> Callable[[Callable[..., _R]], Callable[..., _R]]:
     """Bind a node method as the handler for *affair_type*.
 
     *affair_type* is either an ``affair()`` placeholder or a concrete
@@ -191,13 +238,14 @@ def associate(
 
         def inject(self, key: type[object]) -> object: ...
 
-    def decorator(func: Callable[..., object]) -> Callable[..., object]:
+    def decorator(func: Callable[..., _R]) -> Callable[..., _R]:
         placeholder = (
             typed_affair_type
             if isinstance(typed_affair_type, AffairPlaceholder)
             else None
         )
         generated_affair = _build_generated_affair(func, typed_affair_type)
+        user_sig = _build_user_signature(func)
 
         def resolve_for_associate(bound: BoundArguments) -> _AssociateNode:
             if "self" not in bound.arguments:
@@ -247,8 +295,9 @@ def associate(
                 LISTEN_SPEC_ATTR,
                 ListenSpec(affair_types=[generated_affair], after=None, when=None),
             )
+            setattr(async_wrapper, _SIGNATURE_ATTR, user_sig)
 
-            return async_wrapper
+            return cast(Callable[..., _R], async_wrapper)
 
         @wraps(func)
         def sync_wrapper(*args: object, **kwargs: object) -> object:
@@ -277,8 +326,9 @@ def associate(
             LISTEN_SPEC_ATTR,
             ListenSpec(affair_types=[generated_affair], after=None, when=None),
         )
+        setattr(sync_wrapper, _SIGNATURE_ATTR, user_sig)
 
-        return sync_wrapper
+        return cast(Callable[..., _R], sync_wrapper)
 
     return decorator
 

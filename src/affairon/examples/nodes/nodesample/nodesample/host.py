@@ -1,5 +1,5 @@
 from affairon import AffairMain, listen
-from nodesample.nodes import demo
+from nodesample.app import demo
 
 
 @listen(AffairMain)

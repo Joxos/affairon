@@ -10,9 +10,10 @@ from loguru import logger
 from packaging.requirements import Requirement
 from packaging.version import Version
 
-from affairon._types import AsyncCallback, SyncCallback
+from affairon._types import SyncCallback
 from affairon.affairs import MutableAffair
-from affairon.aware import DispatcherLike, validate_listener_mode
+from affairon.aware import validate_listener_mode
+from affairon.dispatcher import Dispatcher
 from affairon.exceptions import (
     PluginConfigError,
     PluginEntryPointError,
@@ -38,8 +39,8 @@ def _config_section_name(profile: str | None) -> str:
 
 
 class PluginComposer:
-    def __init__(self, dispatcher: DispatcherLike) -> None:
-        self.dispatcher: DispatcherLike = dispatcher
+    def __init__(self, dispatcher: Dispatcher) -> None:
+        self.dispatcher: Dispatcher = dispatcher
         self.loaded_plugins: set[str] = set()
         self.loaded_local_plugins: set[str] = set()
 
@@ -237,9 +238,7 @@ class PluginComposer:
     ) -> None:
         module_callbacks: dict[Callable[..., object], Callable[..., object]] = {}
         callback_specs: list[tuple[Callable[..., object], ListenSpec]] = []
-        registrations: list[
-            tuple[list[type[MutableAffair]], SyncCallback | AsyncCallback]
-        ] = []
+        registrations: list[tuple[list[type[MutableAffair]], SyncCallback]] = []
 
         module_namespace = cast(Mapping[str, object], vars(module))
         for _name, attr in module_namespace.items():
@@ -259,13 +258,13 @@ class PluginComposer:
             for callback, spec in callback_specs:
                 validate_listener_mode(self.dispatcher, callback)
                 after = spec.after
-                after_cbs: list[Callable[..., object]] | None = None
+                after_cbs: list[SyncCallback] | None = None
                 if after:
                     after_cbs = [
-                        module_callbacks.get(cb, cb)
+                        cast(SyncCallback, module_callbacks.get(cb, cb))
                         for cb in cast(list[Callable[..., object]], after)
                     ]
-                typed_callback = cast(SyncCallback | AsyncCallback, callback)
+                typed_callback = cast(SyncCallback, callback)
                 self.dispatcher.register(
                     spec.affair_types,
                     typed_callback,

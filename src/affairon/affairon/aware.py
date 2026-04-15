@@ -1,39 +1,21 @@
 import inspect
 from collections.abc import Callable, Mapping
 from types import TracebackType
-from typing import Protocol, cast, override, runtime_checkable
+from typing import cast, override
 
 from loguru import logger
 
-from affairon._types import AsyncCallback, SyncCallback
+from affairon._types import SyncCallback
 from affairon.affairs import MutableAffair
+from affairon.dispatcher import Dispatcher
 from affairon.listen import ListenSpec, get_listen_spec
 
 log = logger.bind(source=__name__)
 
 
-@runtime_checkable
-class DispatcherLike(Protocol):
-    def emit(self, affair: MutableAffair) -> object: ...
-
-    def register(
-        self,
-        affair_types: type[MutableAffair] | list[type[MutableAffair]],
-        callback: Callable[..., object],
-        *,
-        after: list[Callable[..., object]] | None = None,
-        when: Callable[[MutableAffair], bool] | None = None,
-    ) -> None: ...
-
-    def unregister(
-        self,
-        *affair_types: type[MutableAffair],
-        callback: Callable[..., object] | None = None,
-    ) -> None: ...
-
-
-def validate_listener_mode(dispatcher: DispatcherLike, callback: object) -> None:
-    dispatcher_is_async = inspect.iscoroutinefunction(dispatcher.emit)
+def validate_listener_mode(dispatcher: object, callback: object) -> None:
+    emit = getattr(dispatcher, "emit", None)
+    dispatcher_is_async = inspect.iscoroutinefunction(emit)
     callback_is_async = inspect.iscoroutinefunction(callback)
 
     if dispatcher_is_async == callback_is_async:
@@ -55,16 +37,14 @@ class AffairAwareMeta(type):
         dispatcher = kwargs.pop("dispatcher", None)
         instance = cast(object, super().__call__(*args, **kwargs))
         if isinstance(instance, AffairAware):
-            instance.bind_affair_methods(cast(DispatcherLike | None, dispatcher))
+            instance.bind_affair_methods(cast(Dispatcher | None, dispatcher))
         return instance
 
 
 class AffairAware(metaclass=AffairAwareMeta):
-    _affair_registrations: list[
-        tuple[DispatcherLike, list[type[MutableAffair]], SyncCallback | AsyncCallback]
-    ] = []
+    _affair_registrations: list[tuple[object, list[type[MutableAffair]], object]] = []
 
-    def bind_affair_methods(self, dispatcher: DispatcherLike | None) -> None:
+    def bind_affair_methods(self, dispatcher: Dispatcher | None) -> None:
         self._affair_registrations = []
 
         unbound_to_bound: dict[object, Callable[..., object]] = {}
@@ -98,20 +78,23 @@ class AffairAware(metaclass=AffairAwareMeta):
             for _func, bound, spec in specs:
                 validate_listener_mode(dispatcher, bound)
                 after_raw = spec.after
-                after_cbs: list[Callable[..., object]] | None = None
+                after_cbs: list[SyncCallback] | None = None
                 if after_raw:
                     after_cbs = [
-                        unbound_to_bound.get(cb, cb)
+                        cast(SyncCallback, unbound_to_bound.get(cb, cb))
                         for cb in cast(list[Callable[..., object]], after_raw)
                     ]
                 dispatcher.register(
-                    spec.affair_types, bound, after=after_cbs, when=spec.when
+                    spec.affair_types,
+                    cast(SyncCallback, bound),
+                    after=after_cbs,
+                    when=spec.when,
                 )
                 self._affair_registrations.append(
                     (
                         dispatcher,
                         spec.affair_types,
-                        cast(SyncCallback | AsyncCallback, bound),
+                        cast(object, bound),
                     )
                 )
         except Exception:
@@ -127,7 +110,9 @@ class AffairAware(metaclass=AffairAwareMeta):
     def unregister(self) -> None:
         for dispatcher, affair_types, callback in self._affair_registrations:
             try:
-                dispatcher.unregister(*affair_types, callback=callback)
+                cast(Dispatcher, dispatcher).unregister(
+                    *affair_types, callback=cast(SyncCallback | None, callback)
+                )
             except Exception:
                 pass
         self._affair_registrations.clear()
@@ -147,6 +132,5 @@ class AffairAware(metaclass=AffairAwareMeta):
 __all__ = [
     "AffairAware",
     "AffairAwareMeta",
-    "DispatcherLike",
     "validate_listener_mode",
 ]

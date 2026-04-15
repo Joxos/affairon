@@ -14,8 +14,8 @@ from typing import cast
 from loguru import logger
 
 from affairon import AffairMain, default_async_dispatcher, default_dispatcher
-from affairon.aware import DispatcherLike
 from affairon.composer import PluginComposer
+from affairon.dispatcher import Dispatcher
 from affairon.fairun.stubgen import generate_stub_files
 
 log = logger.bind(source=__name__)
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if use_async:
         dispatcher = default_async_dispatcher
-        composer = PluginComposer(cast(DispatcherLike, cast(object, dispatcher)))
+        composer = PluginComposer(cast(Dispatcher, dispatcher))
         composer.compose_from_pyproject(pyproject_path)
 
         if generate_stubs:
@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> None:
         _ = asyncio.run(dispatcher.emit(affair))
     else:
         dispatcher = default_dispatcher
-        composer = PluginComposer(cast(DispatcherLike, cast(object, dispatcher)))
+        composer = PluginComposer(dispatcher)
         composer.compose_from_pyproject(pyproject_path)
 
         if generate_stubs:

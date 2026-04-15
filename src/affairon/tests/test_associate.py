@@ -199,3 +199,49 @@ def test_associate_rejects_arbitrary_types() -> None:
         @associate(object)
         def bad_method(self, x: int) -> None:
             pass
+
+
+def test_associate_preserves_return_type_annotation() -> None:
+    import inspect
+
+    spec = get_associate_spec(DuelNode.set_phase)
+    assert spec is not None
+    sig = inspect.signature(DuelNode.set_phase)
+    assert sig.return_annotation == "dict[str, str]"
+
+
+def test_associate_runtime_signature_shows_user_params() -> None:
+    import inspect
+
+    sig = inspect.signature(DuelNode.set_phase)
+    param_names = list(sig.parameters.keys())
+    assert param_names == ["self", "phase"]
+    assert sig.parameters["phase"].annotation == "str"
+
+
+def test_associate_runtime_signature_strips_injected_locator_params() -> None:
+    import inspect
+
+    sig = inspect.signature(ChildNode.read_parent_runtime)
+    param_names = list(sig.parameters.keys())
+    assert "runtime" not in param_names
+    assert param_names == ["self"]
+
+
+def test_associate_bound_signature_omits_self() -> None:
+    import inspect
+
+    duel = DuelNode().mark_root()
+    sig = inspect.signature(duel.set_phase)
+    param_names = list(sig.parameters.keys())
+    assert "self" not in param_names
+    assert param_names == ["phase"]
+
+
+def test_associate_local_inject_param_stripped_from_signature() -> None:
+    import inspect
+
+    sig = inspect.signature(PhaseNode.current)
+    param_names = list(sig.parameters.keys())
+    assert "runtime" not in param_names
+    assert param_names == ["self"]

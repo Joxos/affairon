@@ -37,7 +37,7 @@ known-first-party = ["affairon"]
 testpaths = ["src/affairon/tests"]
 asyncio_mode = "auto"
 
-[tool.pyright]
+[tool.basedpyright]
 exclude = ["**/.venv", "src/affairon/examples/**"]
 extraPaths = [
     "src/affairon/tests",
