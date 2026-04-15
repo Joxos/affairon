@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, cast
+from collections.abc import Mapping
+from typing import Annotated, ClassVar, cast
 
 import pytest
 
@@ -16,9 +17,9 @@ class PhaseRuntime:
 
 @route("phase")
 class PhaseNode(Node):
-    CurrentAffair = affair()
+    CurrentAffair: ClassVar[type[MutableAffair]]
 
-    @associate(CurrentAffair)
+    @associate(CurrentAffair := affair())
     def current(self, runtime: PhaseRuntime) -> str:
         return runtime.phase
 
@@ -30,9 +31,9 @@ class OwnerNode(Node):
 
 @route("child")
 class ChildNode(Node):
-    ReadParentAffair = affair()
+    ReadParentAffair: ClassVar[type[MutableAffair]]
 
-    @associate(ReadParentAffair)
+    @associate(ReadParentAffair := affair())
     def read_parent_runtime(
         self,
         runtime: Annotated[PhaseRuntime, Parent / OwnerNode / PhaseRuntime],
@@ -42,20 +43,21 @@ class ChildNode(Node):
 
 @route("duel")
 class DuelNode(Node):
-    SetPhaseAffair = affair()
-    LoseLifeAffair = affair()
+    LoseLifeAffair: ClassVar[type[MutableAffair]]
+    SetPhaseAffair: ClassVar[type[MutableAffair]]
+    GainLifeAffair: ClassVar[type[MutableAffair]]
 
-    @associate(LoseLifeAffair)
+    @associate(LoseLifeAffair := affair())
     def lose_life(self, amount: int) -> dict[str, int]:
         self.life = getattr(self, "life", 8000) - amount
         return {"life": self.life}
 
-    @associate(SetPhaseAffair)
+    @associate(SetPhaseAffair := affair())
     def set_phase(self, phase: str) -> dict[str, str]:
         self.phase_value = phase
         return {"phase": phase}
 
-    @associate(affair())
+    @associate(GainLifeAffair := affair())
     def gain_life(self, amount: int) -> dict[str, int]:
         self.life = getattr(self, "life", 8000) + amount
         return {"life": self.life}
@@ -87,9 +89,7 @@ def test_locator_leaf_type_must_match_annotation() -> None:
     owner.provide(PhaseRuntime("BATTLE"))
 
     class BadNode(Node):
-        BadAffair = affair()
-
-        @associate(BadAffair)
+        @associate(BadAffair := affair())
         def bad(
             self,
             runtime: Annotated[PhaseRuntime, Root / OwnerNode / OwnerNode],
@@ -114,27 +114,28 @@ def test_associate_generates_affair_class() -> None:
     assert affair_instance.model_dump()["phase"] == "DRAW"
 
 
-def test_declared_affair_placeholder_is_backfilled_with_generated_class() -> None:
+def test_exposed_affair_name_is_backfilled_with_generated_class() -> None:
     spec = get_associate_spec(DuelNode.set_phase)
 
     assert spec is not None
-    assert DuelNode.SetPhaseAffair is spec.affair_type
+    exposed = cast(Mapping[str, object], vars(DuelNode))["SetPhaseAffair"]
+    assert exposed is spec.affair_type
 
 
-def test_declared_placeholders_bind_directly() -> None:
+def test_multiple_exposed_affairs_bind_directly() -> None:
     spec = get_associate_spec(DuelNode.lose_life)
 
     assert spec is not None
-    assert DuelNode.LoseLifeAffair is spec.affair_type
+    exposed = cast(Mapping[str, object], vars(DuelNode))["LoseLifeAffair"]
+    assert exposed is spec.affair_type
 
 
-def test_anonymous_placeholder_is_not_exposed() -> None:
+def test_walrus_bound_affair_is_exposed() -> None:
     spec = get_associate_spec(DuelNode.gain_life)
 
     assert spec is not None
-    # The affair() passed inline has no name from a class attribute,
-    # so it should not be exposed as a class attribute on DuelNode.
-    assert not hasattr(DuelNode, "GainLifeAffair")
+    exposed = cast(Mapping[str, object], vars(DuelNode))["GainLifeAffair"]
+    assert exposed is spec.affair_type
 
 
 def test_associate_binds_generated_affair_to_dispatcher() -> None:
@@ -158,7 +159,7 @@ def test_direct_associate_call_does_not_emit() -> None:
     assert duel.phase_value == "DRAW"
 
 
-def test_direct_placeholder_syntax_exec_works() -> None:
+def test_walrus_affair_syntax_exec_works() -> None:
     namespace = {
         "Dispatcher": Dispatcher,
         "Node": Node,
@@ -171,9 +172,7 @@ def test_direct_placeholder_syntax_exec_works() -> None:
         """
 @route('duel')
 class DuelSnippet(Node):
-    SetPhaseAffair = affair()
-
-    @associate(SetPhaseAffair)
+    @associate(SetPhaseAffair := affair())
     def set_phase(self, phase: str) -> dict[str, str]:
         self.phase_value = phase
         return {'phase': phase}
@@ -184,7 +183,8 @@ class DuelSnippet(Node):
     duel_type = namespace["DuelSnippet"]
     spec = get_associate_spec(duel_type.set_phase)
     assert spec is not None
-    assert duel_type.SetPhaseAffair is spec.affair_type
+    exposed = cast(Mapping[str, object], vars(duel_type))["SetPhaseAffair"]
+    assert exposed is spec.affair_type
 
     dispatcher = Dispatcher()
     duel = duel_type().mark_root().attach_dispatcher(dispatcher)
@@ -193,8 +193,20 @@ class DuelSnippet(Node):
     assert result == {"phase": "BATTLE"}
 
 
+def test_associate_requires_walrus_bound_name_for_inline_affair() -> None:
+    with pytest.raises(
+        TypeError, match=r"requires a walrus-bound class attribute name"
+    ):
+
+        @route("bad")
+        class BadNode(Node):
+            @associate(affair())
+            def bad(self, amount: int) -> dict[str, int]:
+                return {"amount": amount}
+
+
 def test_associate_rejects_arbitrary_types() -> None:
-    with pytest.raises(TypeError, match="expects an affair\\(\\) placeholder"):
+    with pytest.raises(TypeError, match=r"expects affair\(\)"):
 
         @associate(object)
         def bad_method(self, x: int) -> None:

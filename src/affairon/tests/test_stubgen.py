@@ -153,9 +153,7 @@ def test_injected_parameter_stripping(tmp_path: Path) -> None:
         "\n"
         '@route("child")\n'
         "class ChildNode(Node):\n"
-        "    RecordAffair = affair()\n"
-        "\n"
-        "    @associate(RecordAffair)\n"
+        "    @associate(RecordAffair := affair())\n"
         "    def record(\n"
         "        self,\n"
         "        text: str,\n"
@@ -280,19 +278,16 @@ def test_nodesample_golden(tmp_path: Path) -> None:
     assert "class MemberList(Node):" in nodes_stub
     assert "    names: list[str]" in nodes_stub
     assert "    stats: MemberStats" in nodes_stub
-    assert "    def join(self, name: str) -> dict[str, bool]: ..." in nodes_stub
-    assert "    def kick(self, name: str) -> dict[str, bool]: ..." in nodes_stub
+    assert "    def join(self, name: str) -> None: ..." in nodes_stub
+    assert "    def kick(self, name: str) -> None: ..." in nodes_stub
 
     assert "class MemberStats(Node):" in nodes_stub
     assert "    counts: dict[str, int]" in nodes_stub
-    assert "    def bump(self, name: str) -> dict[str, int]: ..." in nodes_stub
+    assert "    def bump(self, name: str) -> None: ..." in nodes_stub
 
     assert "class MessageLog(Node):" in nodes_stub
     assert "    entries: list[dict[str, str | int]]" in nodes_stub
-    assert (
-        "    def record(self, sender: str, text: str) -> dict[str, int]: ..."
-        in nodes_stub
-    )
+    assert "    def record(self, sender: str, text: str) -> None: ..." in nodes_stub
 
     assert "Annotated" not in nodes_stub
     assert "Root / Clock" not in nodes_stub

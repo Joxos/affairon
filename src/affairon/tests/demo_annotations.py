@@ -7,10 +7,11 @@ directly from the source code — no stub needed.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, ClassVar
 
 from affairon import (
     Dispatcher,
+    MutableAffair,
     Node,
     Parent,
     Root,
@@ -41,13 +42,13 @@ class Room(Node):
 @inject_to(Room)
 @route("log")
 class MessageLog(Node):
+    RecordAffair: ClassVar[type[MutableAffair]]
+
     def __init__(self) -> None:
         super().__init__()
         self.entries: list[str] = []
 
-    RecordAffair = affair()
-
-    @associate(RecordAffair)
+    @associate(RecordAffair := affair())
     def record(
         self,
         sender: str,
@@ -62,15 +63,15 @@ class MessageLog(Node):
 @inject_to(Room)
 @route("members")
 class MemberList(Node):
+    JoinAffair: ClassVar[type[MutableAffair]]
+
     def __init__(self) -> None:
         super().__init__()
         self.names: list[str] = []
 
     stats: MemberStats
 
-    JoinAffair = affair()
-
-    @associate(JoinAffair)
+    @associate(JoinAffair := affair())
     def join(self, name: str) -> dict[str, bool]:
         if name in self.names:
             return {"joined": False}
@@ -81,13 +82,13 @@ class MemberList(Node):
 @inject_to(MemberList)
 @route("stats")
 class MemberStats(Node):
+    BumpAffair: ClassVar[type[MutableAffair]]
+
     def __init__(self) -> None:
         super().__init__()
         self.counts: dict[str, int] = {}
 
-    BumpAffair = affair()
-
-    @associate(BumpAffair)
+    @associate(BumpAffair := affair())
     def bump(
         self,
         name: str,
