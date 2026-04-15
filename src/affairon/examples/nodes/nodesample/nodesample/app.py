@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from affairon import Dispatcher
-
 from nodesample.nodes import Clock, Room
 
 
 def build_room() -> tuple[Room, Dispatcher]:
     dispatcher = Dispatcher()
     room = Room()
-    room.provide(Clock())
-    room.attach_dispatcher(dispatcher)
+    _ = room.provide(Clock())
+    _ = room.attach_dispatcher(dispatcher)
     return room, dispatcher
 
 

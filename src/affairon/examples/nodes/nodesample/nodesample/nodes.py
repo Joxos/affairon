@@ -15,7 +15,8 @@ Features demonstrated:
 
 - @root / @route -- declaring the tree structure
 - inject_to() -- auto-mounting children without manual mount() calls
-- affair() + @associate -- declaring affairs and binding handlers
+- affair() + @associate(NameAffair := affair()) -- declaring affairs
+  and binding handlers
 - provide() / inject() -- per-node runtime registry for helper objects
 - Locator paths (Root / ..., Parent / ...) -- cross-node dependency injection
 - attach_dispatcher() -- wiring the tree to an event bus
@@ -24,9 +25,19 @@ Features demonstrated:
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, ClassVar, TypeAlias, final
 
-from affairon import MutableAffair, Node, Parent, Root, affair, associate, inject_to, root, route
+from affairon import (
+    MutableAffair,
+    Node,
+    Parent,
+    Root,
+    affair,
+    associate,
+    inject_to,
+    root,
+    route,
+)
 
 
 class Clock:
@@ -66,13 +77,12 @@ class Room(Node):
 @inject_to(Room)
 @route("log")
 class MessageLog(Node):
+
     def __init__(self) -> None:
         super().__init__()
         self.entries: list[dict[str, str | int]] = []
 
-    RecordAffair: type[MutableAffair] = affair()
-
-    @associate(RecordAffair)
+    @associate(RecordAffair := affair())
     def record(
         self,
         sender: str,
@@ -92,18 +102,18 @@ class MessageLog(Node):
 @inject_to(Room)
 @route("members")
 class MemberList(Node):
+    JoinAffair: ClassVar[type[MutableAffair]]
+    KickAffair: ClassVar[type[MutableAffair]]
+
     def __init__(self) -> None:
         super().__init__()
         self.names: list[str] = []
 
-    JoinAffair = affair()
-    KickAffair = affair()
-
-    @associate(JoinAffair)
+    @associate(JoinAffair := affair())
     def join(self, name: str) -> None:
         self.names.append(name)
 
-    @associate(KickAffair)
+    @associate(KickAffair := affair())
     def kick(self, name: str) -> None:
         self.names.remove(name)
 
@@ -116,13 +126,13 @@ class MemberList(Node):
 @inject_to(MemberList)
 @route("stats")
 class MemberStats(Node):
+    BumpAffair: ClassVar[type[MutableAffair]]
+
     def __init__(self) -> None:
         super().__init__()
         self.counts: dict[str, int] = {}
 
-    BumpAffair = affair()
-
-    @associate(BumpAffair)
+    @associate(BumpAffair := affair())
     def bump(
         self,
         name: str,

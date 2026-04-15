@@ -17,7 +17,7 @@ Example::
     from typing import Annotated
     from affairon import Root, Parent
 
-    @associate(RecordAffair)
+    @associate(RecordAffair := affair())
     def record(
         self,
         msg: str,

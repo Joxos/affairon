@@ -28,8 +28,8 @@ replaced the earlier `@Parent.inject` decorator, which was removed because
 `inject` on a class (returning a decorator) clashed with `inject` on an
 instance (looking up a runtime object).
 
-**affair() + @associate** -- each node declares affair slots with `affair()`
-and binds handlers with `@associate`.  The framework generates a
+**affair() + @associate** -- each node binds handlers with
+`@associate(NameAffair := affair())`.  The framework generates a
 `MutableAffair` subclass from the handler's parameter signature.  After
 `attach_dispatcher()`, emitting that affair triggers the handler.  The handler
 can also be called directly as a plain method.

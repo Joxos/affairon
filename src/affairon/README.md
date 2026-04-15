@@ -368,8 +368,8 @@ Nodes form a tree where each node owns its own state, declares affairs via
 | `@route("name")` | Names a node class so it can be mounted as a child under that attribute name. |
 | `@root` | Marks a node class as a tree root.  Root nodes auto-mount declared children on construction. |
 | `inject_to(Parent)` | Declares a node class as an auto-mounted child of `Parent`. |
-| `affair()` | Declares an affair slot on a node class (like `enum.auto()`).  `@associate` fills it with a generated `MutableAffair` subclass. |
-| `@associate(SomeAffair)` | Binds a method as the handler for `SomeAffair`.  When the tree is connected to a dispatcher, the method is registered as a listener.  It can also be called directly. |
+| `affair()` | Creates a declaration token for `@associate`. |
+| `@associate(NameAffair := affair())` | Binds a method and exposes the generated `MutableAffair` subclass as `NameAffair` on the node class.  When the tree is connected to a dispatcher, the method is registered as a listener.  It can also be called directly. |
 | `provide(obj)` / `inject(Type)` | Per-node type-keyed store.  `provide` stores an object by its type; `inject` retrieves it. |
 | `Root / Type`, `Parent / Type` | Locator path expressions.  Used in `Annotated[T, Root / T]` type hints on `@associate` parameters to inject objects from other nodes in the tree. |
 | `attach_dispatcher(d)` | Connects the entire tree to a `Dispatcher`, recursively registering all `@associate` handlers. |
@@ -407,19 +407,17 @@ class Counter(Node):
         super().__init__()
         self.value = 0
 
-    IncrementAffair = affair()
-
-    @associate(IncrementAffair)
+    @associate(IncrementAffair := affair())
     def increment(self, amount: int) -> dict[str, int]:
         self.value += amount
         return {"value": self.value}
 ```
 
-`affair()` creates a placeholder. When `NodeMeta` processes the class,
-it sees that `@associate(IncrementAffair)` targets that placeholder and
-generates a `MutableAffair` subclass with fields `node: object` and
-`amount: int` (inferred from the method signature). The generated class
-is then written back to `Counter.IncrementAffair`.
+`affair()` creates a declaration token. When `NodeMeta` processes the class,
+it finds the walrus-bound `IncrementAffair` token, generates a
+`MutableAffair` subclass with fields `node: object` and `amount: int`
+(inferred from the method signature), and writes it back to
+`Counter.IncrementAffair`.
 
 ### Building a tree
 
@@ -452,7 +450,7 @@ parameter with a locator path:
 from typing import Annotated
 from affairon import Root, Parent
 
-@associate(RecordAffair)
+@associate(RecordAffair := affair())
 def record(
     self,
     msg: str,
